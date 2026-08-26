@@ -1,0 +1,17 @@
+{
+  "queries": [
+    { "text": "python", "region": "7700000000" },
+    { "text": "javascript", "region": "7700000000" },
+    { "text": "frontend", "region": "7800000000" }
+  ],
+  "filters": {
+    "minSalary": 80000,
+    "excludeKeywords": ["вахта", "курьер", "продавец", "оператор call", "менеджер по продажам"],
+    "requireSalary": false,
+    "maxAgeDays": 3
+  },
+  "limits": {
+    "perQuery": 100,
+    "maxNotificationsPerRun": 12
+  }
+}

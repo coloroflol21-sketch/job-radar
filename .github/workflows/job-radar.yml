@@ -1,0 +1,66 @@
+name: Job Radar
+
+on:
+  schedule:
+    # Каждые 2 часа с 07:00 до 21:00 по Москве (UTC+3).
+    - cron: '0 4,6,8,10,12,14,16,18 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Только показать вакансии в логе, без отправки в Telegram'
+        type: boolean
+        default: false
+
+# Состояние коммитится обратно в репозиторий, поэтому нужна запись.
+permissions:
+  contents: write
+
+# Параллельные запуски создали бы конфликт при коммите state.json.
+concurrency:
+  group: job-radar
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Тесты
+        run: npm test
+
+      - name: Поиск вакансий
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            npm run dry-run
+          else
+            npm start
+          fi
+
+      - name: Сохранить состояние
+        if: success() && inputs.dry_run != true
+        run: |
+          if git diff --quiet -- state/state.json; then
+            echo "Состояние не изменилось."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state/state.json
+          git commit -m "chore: обновление состояния job-radar [skip ci]"
+          # Между запуском и коммитом состояние могло уехать: подтягиваем и повторяем.
+          for attempt in 1 2 3; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && git push && exit 0
+            echo "Попытка $attempt не удалась, повтор..."
+            sleep 5
+          done
+          exit 1
