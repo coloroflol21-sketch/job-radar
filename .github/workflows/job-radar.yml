@@ -51,6 +51,8 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          # Необязательный: адрес в поле «От кого», если он отличается от SMTP_USER.
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
         run: |
           if [ "${{ inputs.dry_run }}" = "true" ]; then
             npm run dry-run
