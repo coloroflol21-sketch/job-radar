@@ -12,6 +12,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dry-run": "node src/index.js --dry-run",
+    "check": "node scripts/check-setup.mjs",
     "test": "node --test \"test/*.test.js\""
   },
   "license": "MIT"
