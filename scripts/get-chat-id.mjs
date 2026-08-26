@@ -38,7 +38,7 @@ if (!token) {
   const me = await call(token, 'getMe');
 
   if (!me.ok) {
-    console.error(`❌ Токен не принят: ${me.description}`);
+    console.error(`[ !! ] Токен не принят: ${me.description}`);
     console.error('Проверьте, что скопирован весь токен целиком, вместе с частью до двоеточия.');
     process.exitCode = 1;
   } else {
@@ -47,7 +47,7 @@ if (!token) {
 
     const hook = await call(token, 'getWebhookInfo');
     if (hook.ok && hook.result?.url) {
-      console.error(`❌ У бота установлен webhook: ${hook.result.url}`);
+      console.error(`[ !! ] У бота установлен webhook: ${hook.result.url}`);
       console.error('Пока он стоит, сообщения не читаются. Удалите его:');
       console.error(`   https://api.telegram.org/bot<ТОКЕН>/deleteWebhook`);
       process.exitCode = 1;
@@ -63,7 +63,7 @@ if (!token) {
         const updates = await call(token, 'getUpdates', { timeout: '20', limit: '10' });
 
         if (!updates.ok) {
-          console.error(`❌ Ошибка Telegram: ${updates.description}`);
+          console.error(`[ !! ] Ошибка Telegram: ${updates.description}`);
           process.exitCode = 1;
           break;
         }
@@ -80,7 +80,7 @@ if (!token) {
       if (found) {
         const chat = found.chat;
         const who = chat.username ? `@${chat.username}` : chat.first_name ?? 'вы';
-        console.log('✅ Сообщение получено!');
+        console.log('[ OK ] Сообщение получено!');
         console.log(`   от: ${who}`);
         console.log(`   текст: ${found.text ?? '(без текста)'}`);
         console.log(`\nВаш TELEGRAM_CHAT_ID: ${chat.id}\n`);
@@ -88,7 +88,7 @@ if (!token) {
         console.log(`   TELEGRAM_CHAT_ID=${chat.id}`);
         console.log('и запустите проверку: npm run check');
       } else if (process.exitCode !== 1) {
-        console.error('❌ Сообщений не пришло.');
+        console.error('[ !! ] Сообщений не пришло.');
         console.error('\nВозможные причины:');
         console.error(`   1. Писали другому боту, а не @${me.result.username}`);
         console.error('   2. Чат открыт, но сообщение не отправлено (нажат Start без текста тоже подойдёт)');

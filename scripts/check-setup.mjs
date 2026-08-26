@@ -24,9 +24,10 @@ if (Object.keys(loaded).length > 0) {
 const results = [];
 let mailTransport = null;
 
+// Консоль Windows по умолчанию не показывает эмодзи, поэтому маркеры текстовые.
 function report(name, ok, detail) {
   results.push({ name, ok });
-  console.log(`${ok ? '✅' : '❌'} ${name}${detail ? `: ${detail}` : ''}`);
+  console.log(`${ok ? '[ OK ]' : '[ !! ]'} ${name}${detail ? `: ${detail}` : ''}`);
 }
 
 async function checkTelegramToken(token) {
