@@ -6,6 +6,14 @@
  * Запуск: node scripts/get-chat-id.mjs
  */
 
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+
+import { loadEnv } from '../src/env.js';
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+loadEnv(resolve(ROOT, '.env'));
+
 // База API вынесена, чтобы скрипт можно было проверить на локальном сервере.
 const API = process.env.TELEGRAM_API_BASE ?? 'https://api.telegram.org';
 const WAIT_SECONDS = Number(process.env.WAIT_SECONDS ?? 90);
@@ -20,7 +28,11 @@ const token = (process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
 
 if (!token) {
   console.error('Не задан TELEGRAM_BOT_TOKEN.');
-  console.error('Задайте его так: export TELEGRAM_BOT_TOKEN="ваш_токен"');
+  console.error('');
+  console.error('Создайте файл .env в папке проекта и впишите в него строку:');
+  console.error('   TELEGRAM_BOT_TOKEN=ваш_токен_от_BotFather');
+  console.error('');
+  console.error('Готовый образец лежит рядом: .env.example — скопируйте его в .env.');
   process.exitCode = 1;
 } else {
   const me = await call(token, 'getMe');
@@ -72,9 +84,9 @@ if (!token) {
         console.log(`   от: ${who}`);
         console.log(`   текст: ${found.text ?? '(без текста)'}`);
         console.log(`\nВаш TELEGRAM_CHAT_ID: ${chat.id}\n`);
-        console.log('Дальше:');
-        console.log(`   export TELEGRAM_CHAT_ID="${chat.id}"`);
-        console.log('   npm run check');
+        console.log('Дальше: впишите эту строку в файл .env');
+        console.log(`   TELEGRAM_CHAT_ID=${chat.id}`);
+        console.log('и запустите проверку: npm run check');
       } else if (process.exitCode !== 1) {
         console.error('❌ Сообщений не пришло.');
         console.error('\nВозможные причины:');

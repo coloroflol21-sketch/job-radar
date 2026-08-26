@@ -8,6 +8,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
+import { loadEnv } from './env.js';
 import { fetchVacancies } from './sources/trudvsem.js';
 import { selectNew } from './filter.js';
 import { loadState, saveState, windowStart } from './state.js';
@@ -17,6 +18,8 @@ import { processInbox } from './inbox.js';
 import { createMailer } from './mailer.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+loadEnv(resolve(ROOT, '.env'));
 
 function parseArgs(argv) {
   const args = { dryRun: false, config: resolve(ROOT, 'config.json'), state: resolve(ROOT, 'state/state.json') };

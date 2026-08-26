@@ -6,7 +6,20 @@
  * Запуск: node scripts/check-setup.mjs
  */
 
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+
+import { loadEnv } from '../src/env.js';
 import { createMailer } from '../src/mailer.js';
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const loaded = loadEnv(resolve(ROOT, '.env'));
+
+if (Object.keys(loaded).length > 0) {
+  console.log(`Настройки прочитаны из .env: ${Object.keys(loaded).join(', ')}\n`);
+} else {
+  console.log('Файл .env не найден — беру настройки из переменных окружения.\n');
+}
 
 const results = [];
 let mailTransport = null;
