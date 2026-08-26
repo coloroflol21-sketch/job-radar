@@ -83,6 +83,9 @@ function normalize(raw, query) {
     email: pickEmail(v),
     contactPerson: (v.contact_person ?? '').trim(),
     schedule: v.schedule ?? '',
+    // API заполняет employment только у трети вакансий, поэтому «удалёнку»
+    // приходится искать ещё и в тексте — см. isRemote в filter.js.
+    employment: v.employment ?? '',
     experienceYears: Number(requirement?.experience) || 0,
     description: v.duty ?? '',
     createdAt: v['creation-date'] ?? '',

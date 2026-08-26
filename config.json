@@ -1,14 +1,20 @@
 {
   "queries": [
-    { "text": "python", "region": "7700000000" },
-    { "text": "javascript", "region": "7700000000" },
-    { "text": "frontend", "region": "7800000000" }
+    { "text": "специалист технической поддержки", "region": "7700000000" },
+    { "text": "техническая поддержка", "region": "7700000000" },
+    { "text": "служба поддержки", "region": "7700000000" }
   ],
   "filters": {
-    "minSalary": 80000,
-    "excludeKeywords": ["вахта", "курьер", "продавец", "оператор call", "менеджер по продажам"],
+    "minSalary": 60000,
     "requireSalary": false,
-    "maxAgeDays": 3
+    "maxAgeDays": 3,
+
+    "titleKeywords": ["поддержк", "helpdesk", "сопровождени"],
+    "excludeKeywords": ["вахта", "курьер", "продавец", "оператор call", "менеджер по продажам"],
+
+    "maxExperienceYears": null,
+    "remoteOnly": false,
+    "schedules": []
   },
   "limits": {
     "perQuery": 100,

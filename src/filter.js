@@ -12,12 +12,39 @@ function effectiveSalary(vacancy) {
   return Math.max(vacancy.salaryMax || 0, vacancy.salaryMin || 0);
 }
 
+const REMOTE_PATTERN = /удал[её]н|дистанцион|remote|на дому/i;
+
+/**
+ * Удалённая работа. Поле employment у источника заполнено лишь у трети вакансий,
+ * поэтому проверяем ещё название и описание — иначе фильтр отсёк бы почти всё.
+ */
+export function isRemote(vacancy) {
+  const employment = vacancy.employment ?? '';
+  if (REMOTE_PATTERN.test(employment)) return true;
+  return REMOTE_PATTERN.test(`${vacancy.title ?? ''} ${vacancy.description ?? ''}`);
+}
+
+/**
+ * Ключевые слова ищутся только в названии вакансии: в описании слово «поддержка»
+ * встречается у половины вакансий подряд и фильтр перестаёт работать.
+ * Совпадение по любому из слов, регистр не важен.
+ */
+export function matchesTitle(vacancy, keywords = []) {
+  if (keywords.length === 0) return true;
+  const title = (vacancy.title ?? '').toLowerCase();
+  return keywords.some((word) => word && title.includes(word.toLowerCase()));
+}
+
 export function matchesFilters(vacancy, filters = {}) {
   const {
     minSalary = 0,
     excludeKeywords = [],
     requireSalary = false,
     maxAgeDays = Infinity,
+    titleKeywords = [],
+    maxExperienceYears = null,
+    remoteOnly = false,
+    schedules = [],
   } = filters;
 
   const salary = effectiveSalary(vacancy);
@@ -28,6 +55,19 @@ export function matchesFilters(vacancy, filters = {}) {
 
   const haystack = `${vacancy.title} ${vacancy.description}`.toLowerCase();
   if (excludeKeywords.some((word) => word && haystack.includes(word.toLowerCase()))) return false;
+
+  if (!matchesTitle(vacancy, titleKeywords)) return false;
+
+  if (maxExperienceYears !== null && (vacancy.experienceYears ?? 0) > maxExperienceYears) return false;
+
+  if (remoteOnly && !isRemote(vacancy)) return false;
+
+  // Графики сверяем по подстроке: в данных они записаны длинными формулировками
+  // вроде «Неполный рабочий день/неполная рабочая неделя».
+  if (schedules.length > 0) {
+    const schedule = (vacancy.schedule ?? '').toLowerCase();
+    if (!schedules.some((wanted) => wanted && schedule.includes(wanted.toLowerCase()))) return false;
+  }
 
   return true;
 }
