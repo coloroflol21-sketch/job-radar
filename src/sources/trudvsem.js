@@ -41,6 +41,22 @@ async function fetchJson(url, { retries = 3, fetchImpl = fetch } = {}) {
   throw lastError;
 }
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Адрес для отклика. Контакт вакансии приоритетнее адреса компании:
+ * в контактах обычно рекрутёр, у компании — общий ящик вида zakupki@ или info@.
+ */
+function pickEmail(v) {
+  const fromContacts = (v.contact_list ?? [])
+    .map((contact) => (contact.contact_value ?? '').trim())
+    .find((value) => EMAIL_PATTERN.test(value));
+  if (fromContacts) return fromContacts;
+
+  const fromCompany = (v.company?.email ?? '').trim();
+  return EMAIL_PATTERN.test(fromCompany) ? fromCompany : '';
+}
+
 /** Приводит запись API к плоскому виду, на который опирается остальной код. */
 function normalize(raw, query) {
   const v = raw.vacancy ?? raw;
@@ -64,6 +80,8 @@ function normalize(raw, query) {
     salaryMin,
     salaryMax,
     salaryText: v.salary ?? '',
+    email: pickEmail(v),
+    contactPerson: (v.contact_person ?? '').trim(),
     schedule: v.schedule ?? '',
     experienceYears: Number(requirement?.experience) || 0,
     description: v.duty ?? '',

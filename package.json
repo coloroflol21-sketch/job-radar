@@ -6,6 +6,9 @@
   "engines": {
     "node": ">=20"
   },
+  "dependencies": {
+    "nodemailer": "9.0.5"
+  },
   "scripts": {
     "start": "node src/index.js",
     "dry-run": "node src/index.js --dry-run",

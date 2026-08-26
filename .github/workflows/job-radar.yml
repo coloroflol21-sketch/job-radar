@@ -2,8 +2,10 @@ name: Job Radar
 
 on:
   schedule:
-    # Каждые 2 часа с 07:00 до 21:00 по Москве (UTC+3).
-    - cron: '0 4,6,8,10,12,14,16,18 * * *'
+    # Каждые 30 минут с 07:00 до 22:00 по Москве (UTC+3).
+    # Частота задаёт задержку ответа бота на команды: в среднем 15 минут.
+    # Минута 17, а не 0: GitHub предупреждает о задержках в начале часа.
+    - cron: '17,47 4-19 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -31,14 +33,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
+
+      - name: Зависимости
+        run: npm ci
 
       - name: Тесты
         run: npm test
 
-      - name: Поиск вакансий
+      - name: Поиск вакансий и обработка команд
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Нужны только для отправки откликов: без них /apply вернёт понятную ошибку,
+          # а поиск вакансий продолжит работать.
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
         run: |
           if [ "${{ inputs.dry_run }}" = "true" ]; then
             npm run dry-run
@@ -46,8 +58,10 @@ jobs:
             npm start
           fi
 
+      # Коммитим даже после сбоя предыдущего шага: отклик мог уже уйти,
+      # и без сохранения журнала он отправится повторно при следующем запуске.
       - name: Сохранить состояние
-        if: success() && inputs.dry_run != true
+        if: always() && inputs.dry_run != true
         run: |
           if git diff --quiet -- state/state.json; then
             echo "Состояние не изменилось."

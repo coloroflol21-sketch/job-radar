@@ -18,8 +18,9 @@ function formatSalary(vacancy) {
 }
 
 export function formatVacancy(vacancy, index) {
+  const label = vacancy.code ? `<code>${escapeHtml(vacancy.code)}</code> ` : `${index}. `;
   const lines = [
-    `<b>${index}. ${escapeHtml(vacancy.title)}</b>`,
+    `${label}<b>${escapeHtml(vacancy.title)}</b>`,
     `🏢 ${escapeHtml(vacancy.company)}`,
     `💰 ${escapeHtml(formatSalary(vacancy))}`,
   ];
@@ -27,6 +28,7 @@ export function formatVacancy(vacancy, index) {
   if (vacancy.experienceYears) lines.push(`🎓 опыт от ${vacancy.experienceYears} лет`);
   if (vacancy.schedule) lines.push(`🕒 ${escapeHtml(vacancy.schedule)}`);
   if (vacancy.url) lines.push(`<a href="${escapeHtml(vacancy.url)}">Открыть вакансию</a>`);
+  if (vacancy.code && vacancy.email) lines.push(`✍️ отклик: <code>/apply ${escapeHtml(vacancy.code)}</code>`);
   return lines.join('\n');
 }
 
@@ -75,4 +77,57 @@ export async function sendDigest(vacancies, credentials) {
   for (const message of buildDigest(vacancies)) {
     await sendMessage(message, credentials);
   }
+}
+
+/**
+ * Забирает накопившиеся сообщения (long-polling).
+ * Telegram держит непрочитанное 24 часа, поэтому команды не теряются
+ * между запусками по расписанию. Webhook при этом должен быть не установлен:
+ * getUpdates и webhook взаимоисключающие.
+ */
+export async function getUpdates({ token, offset = 0, fetchImpl = fetch } = {}) {
+  if (!token) throw new Error('Не задан TELEGRAM_BOT_TOKEN');
+
+  const params = new URLSearchParams({
+    offset: String(offset),
+    timeout: '0',
+    allowed_updates: JSON.stringify(['message']),
+  });
+
+  const response = await fetchImpl(`https://api.telegram.org/bot${token}/getUpdates?${params}`);
+  const payload = await response.json();
+  if (!payload.ok) throw new Error(`Telegram: ${payload.description ?? response.status}`);
+  return payload.result ?? [];
+}
+
+/**
+ * Подтверждает обработку апдейтов: смещение выше последнего update_id
+ * заставляет Telegram забыть их и не присылать снова.
+ */
+export async function confirmUpdates({ token, lastUpdateId, fetchImpl = fetch } = {}) {
+  if (!lastUpdateId) return;
+  await getUpdates({ token, offset: lastUpdateId + 1, fetchImpl });
+}
+
+/**
+ * Отбирает сообщения только из своего чата: бот может получить апдейт
+ * от любого, кто его найдёт, а команды дают доступ к отправке почты.
+ */
+export function extractCommands(updates, allowedChatId) {
+  const allowed = String(allowedChatId);
+  const messages = [];
+
+  for (const update of updates) {
+    const message = update.message;
+    const chatId = message?.chat?.id;
+    const text = message?.text;
+    if (!text || String(chatId) !== allowed) continue;
+    messages.push({ text, updateId: update.update_id, from: message.from?.username ?? '' });
+  }
+
+  return messages;
+}
+
+export function lastUpdateId(updates) {
+  return updates.reduce((max, update) => Math.max(max, update.update_id ?? 0), 0);
 }

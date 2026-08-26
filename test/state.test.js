@@ -13,7 +13,41 @@ async function tempFile(name = 'state.json') {
 
 test('отсутствующий файл состояния даёт пустое состояние', async () => {
   const state = await loadState(await tempFile('missing.json'));
-  assert.deepEqual(state, { sentIds: [], lastRunAt: null, totalSent: 0 });
+  assert.deepEqual(state, {
+    sentIds: [],
+    lastRunAt: null,
+    totalSent: 0,
+    catalog: {},
+    sentLog: [],
+    lastUpdateId: 0,
+  });
+});
+
+test('состояние старого формата читается без потерь', async () => {
+  const path = await tempFile();
+  await writeFile(path, JSON.stringify({ sentIds: ['a'], lastRunAt: null, totalSent: 1 }), 'utf8');
+  const state = await loadState(path);
+  assert.deepEqual(state.sentIds, ['a']);
+  assert.deepEqual(state.catalog, {}, 'новые поля получают значения по умолчанию');
+  assert.deepEqual(state.sentLog, []);
+  assert.equal(state.lastUpdateId, 0);
+});
+
+test('каталог и журнал откликов сохраняются', async () => {
+  const path = await tempFile();
+  await saveState(path, {
+    sentIds: [],
+    lastRunAt: null,
+    totalSent: 0,
+    catalog: { A1: { id: 'a', email: 'hr@example.com', addedAt: new Date().toISOString() } },
+    sentLog: [{ code: 'A1', sentAt: new Date().toISOString() }],
+    lastUpdateId: 42,
+  });
+
+  const state = await loadState(path);
+  assert.equal(state.catalog.A1.email, 'hr@example.com');
+  assert.equal(state.sentLog.length, 1);
+  assert.equal(state.lastUpdateId, 42);
 });
 
 test('битый JSON пробрасывает ошибку, а не молча теряет историю', async () => {
