@@ -13,13 +13,13 @@ import { registerVacancies, pruneCatalog } from './catalog.js';
  * dryRun печатает найденное в консоль и не меняет состояние: так можно
  * проверить настройки фильтров, ничего не отправляя.
  */
-export async function scanVacancies(state, statePath, config, { credentials, dryRun = false, log = console.log } = {}) {
+export async function scanVacancies(state, statePath, config, { credentials, dryRun = false, log = console.log, fetchVacanciesImpl = fetchVacancies } = {}) {
   const modifiedFrom = windowStart(state.lastRunAt, { fallbackDays: config.filters?.maxAgeDays ?? 3 });
   log(`Окно поиска: с ${modifiedFrom}`);
 
   const results = await Promise.allSettled(
     config.queries.map((query) =>
-      fetchVacancies(query, { perQuery: config.limits?.perQuery ?? 100, modifiedFrom }),
+      fetchVacanciesImpl(query, { perQuery: config.limits?.perQuery ?? 100, modifiedFrom }),
     ),
   );
 
@@ -39,14 +39,15 @@ export async function scanVacancies(state, statePath, config, { credentials, dry
     throw new Error('Ни один запрос не выполнился, источник недоступен');
   }
 
-  const fresh = selectNew(
-    collected,
-    new Set(state.sentIds),
-    config.filters ?? {},
-    config.limits?.maxNotificationsPerRun ?? 12,
-  );
+  const limit = config.limits?.maxNotificationsPerRun ?? 12;
+  const matching = selectNew(collected, new Set(state.sentIds), config.filters ?? {});
+  const fresh = matching.slice(0, limit);
+  const deferred = matching.length - fresh.length;
 
-  log(`Всего собрано ${collected.length}, после фильтров и дедупликации: ${fresh.length}`);
+  log(`Всего собрано ${collected.length}, после фильтров и дедупликации: ${matching.length}`);
+  if (deferred > 0) {
+    log(`Отправляю ${fresh.length}, остальные ${deferred} — в следующем запуске.`);
+  }
 
   if (fresh.length === 0) {
     if (!dryRun) {
@@ -70,7 +71,9 @@ export async function scanVacancies(state, statePath, config, { credentials, dry
   await sendDigest(coded, credentials);
 
   state.sentIds = [...state.sentIds, ...coded.map((vacancy) => vacancy.id)];
-  state.lastRunAt = new Date().toISOString();
+  // Окно сдвигаем только когда отправили всё найденное. Иначе отложенные лимитом
+  // вакансии выпали бы из следующего окна поиска и не пришли бы уже никогда.
+  if (deferred === 0) state.lastRunAt = new Date().toISOString();
   state.totalSent = (state.totalSent ?? 0) + coded.length;
   await saveState(statePath, state);
 
