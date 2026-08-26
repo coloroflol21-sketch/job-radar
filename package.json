@@ -11,6 +11,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
+    "bot": "node src/index.js --serve",
     "dry-run": "node src/index.js --dry-run",
     "check": "node scripts/check-setup.mjs",
     "chat-id": "node scripts/get-chat-id.mjs",

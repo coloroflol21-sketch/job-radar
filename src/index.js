@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 /**
- * Job Radar — присылает в Telegram новые вакансии по заданным запросам.
- * Запуск: node src/index.js [--dry-run] [--config path]
+ * Job Radar — вакансии в Telegram и отклики прямо из чата.
+ *
+ * Запуск:
+ *   node src/index.js            один прогон: команды + поиск (для GitHub Actions)
+ *   node src/index.js --serve    живой бот: отвечает сразу, пока не остановите
+ *   node src/index.js --dry-run  показать найденное в консоли, ничего не отправляя
  */
 
 import { readFile } from 'node:fs/promises';
@@ -9,12 +13,10 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 import { loadEnv } from './env.js';
-import { fetchVacancies } from './sources/trudvsem.js';
-import { selectNew } from './filter.js';
-import { loadState, saveState, windowStart } from './state.js';
-import { sendDigest, formatVacancy } from './telegram.js';
-import { registerVacancies, pruneCatalog } from './catalog.js';
+import { loadState } from './state.js';
 import { processInbox } from './inbox.js';
+import { scanVacancies } from './scan.js';
+import { serve, announceOnline, announceOffline } from './serve.js';
 import { createMailer } from './mailer.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -22,13 +24,43 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 loadEnv(resolve(ROOT, '.env'));
 
 function parseArgs(argv) {
-  const args = { dryRun: false, config: resolve(ROOT, 'config.json'), state: resolve(ROOT, 'state/state.json') };
+  const args = {
+    dryRun: false,
+    serve: false,
+    config: resolve(ROOT, 'config.json'),
+    state: resolve(ROOT, 'state/state.json'),
+    scanInterval: 60,
+  };
+
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--dry-run') args.dryRun = true;
+    else if (argv[i] === '--serve') args.serve = true;
     else if (argv[i] === '--config') args.config = resolve(argv[++i]);
     else if (argv[i] === '--state') args.state = resolve(argv[++i]);
+    else if (argv[i] === '--scan-interval') args.scanInterval = Number(argv[++i]) || 60;
   }
+
   return args;
+}
+
+/** Ctrl+C переводит цикл в остановку; второй Ctrl+C выходит немедленно. */
+function stopOnInterrupt(log) {
+  const controller = new AbortController();
+  let asked = false;
+
+  const onSignal = () => {
+    if (asked) {
+      log('\nВыхожу немедленно.');
+      process.exit(130);
+    }
+    asked = true;
+    log('\nЗавершаю текущую операцию... (ещё раз Ctrl+C — выйти сразу)');
+    controller.abort();
+  };
+
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
+  return controller.signal;
 }
 
 async function main() {
@@ -40,6 +72,28 @@ async function main() {
     token: process.env.TELEGRAM_BOT_TOKEN,
     chatId: process.env.TELEGRAM_CHAT_ID,
   };
+
+  if (args.serve) {
+    if (!credentials.token || !credentials.chatId) {
+      throw new Error('Для режима бота нужны TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в файле .env');
+    }
+
+    const stopSignal = stopOnInterrupt(console.log);
+    await announceOnline(credentials, { scanIntervalMinutes: args.scanInterval });
+
+    try {
+      await serve(state, args.state, config, {
+        credentials,
+        stopSignal,
+        scanIntervalMinutes: args.scanInterval,
+      });
+    } finally {
+      // Сообщение об остановке отправляем в любом случае, чтобы в чате
+      // не осталось ложного впечатления, что бот ещё отвечает.
+      await announceOffline(credentials).catch(() => {});
+    }
+    return;
+  }
 
   if (!args.dryRun && credentials.token && credentials.chatId) {
     try {
@@ -57,65 +111,19 @@ async function main() {
     }
   }
 
-  const modifiedFrom = windowStart(state.lastRunAt, { fallbackDays: config.filters?.maxAgeDays ?? 3 });
-  console.log(`Окно поиска: с ${modifiedFrom}`);
-
-  const results = await Promise.allSettled(
-    config.queries.map((query) =>
-      fetchVacancies(query, { perQuery: config.limits?.perQuery ?? 100, modifiedFrom }),
-    ),
-  );
-
-  const collected = [];
-  results.forEach((result, i) => {
-    const label = `${config.queries[i].text}@${config.queries[i].region ?? 'все регионы'}`;
-    if (result.status === 'fulfilled') {
-      console.log(`  ${label}: получено ${result.value.length}`);
-      collected.push(...result.value);
-    } else {
-      console.error(`  ${label}: ошибка — ${result.reason?.message ?? result.reason}`);
-    }
+  const sent = await scanVacancies(state, args.state, config, {
+    credentials,
+    dryRun: args.dryRun,
   });
 
-  if (results.every((r) => r.status === 'rejected')) {
-    throw new Error('Ни один запрос не выполнился, источник недоступен');
+  if (!args.dryRun) {
+    if (sent.length === 0) {
+      console.log('Новых подходящих вакансий нет, уведомление не отправляется.');
+    } else {
+      const withEmail = sent.filter((vacancy) => vacancy.email).length;
+      console.log(`Отправлено вакансий: ${sent.length}, из них с email для отклика: ${withEmail}`);
+    }
   }
-
-  const fresh = selectNew(
-    collected,
-    new Set(state.sentIds),
-    config.filters ?? {},
-    config.limits?.maxNotificationsPerRun ?? 12,
-  );
-
-  console.log(`Всего собрано ${collected.length}, после фильтров и дедупликации: ${fresh.length}`);
-
-  if (fresh.length === 0) {
-    state.lastRunAt = new Date().toISOString();
-    await saveState(args.state, state);
-    console.log('Новых подходящих вакансий нет, уведомление не отправляется.');
-    return;
-  }
-
-  state.catalog ??= {};
-  pruneCatalog(state.catalog);
-  const coded = registerVacancies(state.catalog, fresh);
-  const withEmail = coded.filter((vacancy) => vacancy.email).length;
-
-  if (args.dryRun) {
-    console.log(`\n--- dry-run, сообщения не отправляются (с email: ${withEmail} из ${coded.length}) ---`);
-    coded.forEach((vacancy, i) => console.log(`\n${formatVacancy(vacancy, i + 1)}`));
-    return;
-  }
-
-  await sendDigest(coded, credentials);
-
-  state.sentIds = [...state.sentIds, ...coded.map((v) => v.id)];
-  state.lastRunAt = new Date().toISOString();
-  state.totalSent = (state.totalSent ?? 0) + coded.length;
-  await saveState(args.state, state);
-
-  console.log(`Отправлено вакансий: ${coded.length}, из них с email для отклика: ${withEmail}`);
 }
 
 main().catch((error) => {

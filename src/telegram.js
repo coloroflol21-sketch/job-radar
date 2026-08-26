@@ -85,16 +85,17 @@ export async function sendDigest(vacancies, credentials) {
  * между запусками по расписанию. Webhook при этом должен быть не установлен:
  * getUpdates и webhook взаимоисключающие.
  */
-export async function getUpdates({ token, offset = 0, fetchImpl = fetch } = {}) {
+export async function getUpdates({ token, offset = 0, timeout = 0, signal, fetchImpl = fetch } = {}) {
   if (!token) throw new Error('Не задан TELEGRAM_BOT_TOKEN');
 
   const params = new URLSearchParams({
     offset: String(offset),
-    timeout: '0',
+    // timeout > 0 — длинный опрос: Telegram держит ответ, пока не придёт сообщение.
+    timeout: String(timeout),
     allowed_updates: JSON.stringify(['message']),
   });
 
-  const response = await fetchImpl(`https://api.telegram.org/bot${token}/getUpdates?${params}`);
+  const response = await fetchImpl(`https://api.telegram.org/bot${token}/getUpdates?${params}`, { signal });
   const payload = await response.json();
   if (!payload.ok) throw new Error(`Telegram: ${payload.description ?? response.status}`);
   return payload.result ?? [];

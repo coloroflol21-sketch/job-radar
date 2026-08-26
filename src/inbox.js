@@ -12,10 +12,12 @@ import { saveState } from './state.js';
  * createTransport вызывается только если есть команда /apply: без откликов
  * настройки почты не нужны, и их отсутствие не должно мешать остальному.
  */
-export async function processInbox(state, statePath, credentials, { createTransport, mail = {}, fetchImpl = fetch, now = () => new Date() } = {}) {
+export async function processInbox(state, statePath, credentials, { createTransport, mail = {}, fetchImpl = fetch, now = () => new Date(), timeout = 0, signal } = {}) {
   const updates = await getUpdates({
     token: credentials.token,
     offset: (state.lastUpdateId ?? 0) + 1,
+    timeout,
+    signal,
     fetchImpl,
   });
   if (updates.length === 0) return [];
