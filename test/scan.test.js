@@ -48,12 +48,20 @@ async function tempStatePath() {
 }
 
 const config = {
+  sources: ['trudvsem'],
   queries: [{ text: 'python', region: '7700000000' }],
   filters: { minSalary: 0, maxAgeDays: 30 },
   limits: { perQuery: 100, maxNotificationsPerRun: 3 },
 };
 
-/** Подменяет модуль источника: возвращает заданный набор вакансий. */
+/** Подменяет реестр источников: единственный источник отдаёт заданный набор. */
+function stubSources(vacancies) {
+  return {
+    trudvsem: { label: 'Работа в России', supportsEmail: true, fetch: async () => vacancies },
+  };
+}
+
+/** Готовит вакансии в общем формате, который отдают источники. */
 function makeVacancies(count) {
   return Array.from({ length: count }, (_, i) => ({
     id: `vac-${i}`,
@@ -84,7 +92,7 @@ test('лимит отправки не двигает окно поиска, п�
     const sent = await scanVacancies(state, statePath, config, {
       credentials: telegram.credentials,
       log: (line) => logs.push(line),
-      fetchVacanciesImpl: async () => makeVacancies(10),
+      sources: stubSources(makeVacancies(10)),
     });
 
     assert.equal(sent.length, 3, 'отправлено ровно по лимиту');
@@ -111,7 +119,7 @@ test('когда отправлено всё найденное, окно сдв
     const sent = await scanVacancies(state, statePath, config, {
       credentials: telegram.credentials,
       log: () => {},
-      fetchVacanciesImpl: async () => makeVacancies(2),
+      sources: stubSources(makeVacancies(2)),
     });
 
     assert.equal(sent.length, 2);
@@ -131,17 +139,17 @@ test('отложенные вакансии приходят следующим 
     const first = await scanVacancies(state, statePath, config, {
       credentials: telegram.credentials,
       log: () => {},
-      fetchVacanciesImpl: async () => pool,
+      sources: stubSources(pool),
     });
     const second = await scanVacancies(state, statePath, config, {
       credentials: telegram.credentials,
       log: () => {},
-      fetchVacanciesImpl: async () => pool,
+      sources: stubSources(pool),
     });
     const third = await scanVacancies(state, statePath, config, {
       credentials: telegram.credentials,
       log: () => {},
-      fetchVacanciesImpl: async () => pool,
+      sources: stubSources(pool),
     });
 
     const ids = [...first, ...second, ...third].map((v) => v.id);
@@ -163,12 +171,12 @@ test('повторный запуск не присылает те же вака
     await scanVacancies(state, statePath, config, {
       credentials: telegram.credentials,
       log: () => {},
-      fetchVacanciesImpl: async () => pool,
+      sources: stubSources(pool),
     });
     const again = await scanVacancies(state, statePath, config, {
       credentials: telegram.credentials,
       log: () => {},
-      fetchVacanciesImpl: async () => pool,
+      sources: stubSources(pool),
     });
 
     assert.deepEqual(again, [], 'дубликатов нет');
@@ -186,7 +194,7 @@ test('состояние с отправленными id сохраняется
     await scanVacancies(state, statePath, config, {
       credentials: telegram.credentials,
       log: () => {},
-      fetchVacanciesImpl: async () => makeVacancies(2),
+      sources: stubSources(makeVacancies(2)),
     });
 
     const saved = await loadState(statePath);
@@ -208,12 +216,109 @@ test('dry-run ничего не отправляет и не меняет сос
       credentials: telegram.credentials,
       dryRun: true,
       log: () => {},
-      fetchVacanciesImpl: async () => makeVacancies(5),
+      sources: stubSources(makeVacancies(5)),
     });
 
     assert.equal(telegram.sent.length, 0, 'сообщений не было');
     assert.deepEqual(state.sentIds, [], 'состояние не тронуто');
     assert.equal(state.lastRunAt, null);
+  } finally {
+    await telegram.close();
+  }
+});
+
+test('вакансии собираются из всех включённых источников', async () => {
+  const telegram = await fakeTelegram();
+  const statePath = await tempStatePath();
+  const logs = [];
+
+  const sources = {
+    trudvsem: {
+      label: 'Работа в России',
+      supportsEmail: true,
+      fetch: async () => [{ ...makeVacancies(1)[0], id: 'tv-1', title: 'Из Работы в России' }],
+    },
+    habr: {
+      label: 'Хабр Карьера',
+      supportsEmail: false,
+      fetch: async () => [{ ...makeVacancies(1)[0], id: 'habr-1', title: 'Из Хабра', email: '' }],
+    },
+  };
+
+  try {
+    const sent = await scanVacancies(
+      freshState(),
+      statePath,
+      { ...config, sources: ['trudvsem', 'habr'] },
+      { credentials: telegram.credentials, log: (l) => logs.push(l), sources },
+    );
+
+    assert.equal(sent.length, 2, 'вакансии из двух источников объединены');
+    assert.ok(logs.some((l) => /Работа в России/.test(l)));
+    assert.ok(logs.some((l) => /Хабр Карьера/.test(l)));
+  } finally {
+    await telegram.close();
+  }
+});
+
+test('падение одного источника не отменяет второй', async () => {
+  const telegram = await fakeTelegram();
+  const statePath = await tempStatePath();
+  const logs = [];
+
+  const sources = {
+    trudvsem: { label: 'Работа в России', supportsEmail: true, fetch: async () => { throw new Error('таймаут'); } },
+    habr: { label: 'Хабр Карьера', supportsEmail: false, fetch: async () => makeVacancies(2) },
+  };
+
+  try {
+    const sent = await scanVacancies(
+      freshState(),
+      statePath,
+      { ...config, sources: ['trudvsem', 'habr'] },
+      { credentials: telegram.credentials, log: (l) => logs.push(l), sources },
+    );
+
+    assert.equal(sent.length, 2, 'рабочий источник отработал');
+    assert.ok(logs.some((l) => /Работа в России.*таймаут/.test(l)), 'ошибка видна в логе');
+  } finally {
+    await telegram.close();
+  }
+});
+
+test('когда все источники упали — это ошибка, а не «нет вакансий»', async () => {
+  const telegram = await fakeTelegram();
+  const statePath = await tempStatePath();
+  const failing = {
+    trudvsem: { label: 'Работа в России', supportsEmail: true, fetch: async () => { throw new Error('нет сети'); } },
+  };
+
+  try {
+    await assert.rejects(
+      () => scanVacancies(freshState(), statePath, config, {
+        credentials: telegram.credentials,
+        log: () => {},
+        sources: failing,
+      }),
+      /Ни один источник не ответил/,
+    );
+  } finally {
+    await telegram.close();
+  }
+});
+
+test('пустой список источников — понятная ошибка', async () => {
+  const telegram = await fakeTelegram();
+  const statePath = await tempStatePath();
+  try {
+    await assert.rejects(
+      () => scanVacancies(freshState(), statePath, { ...config, sources: [] }, {
+        credentials: telegram.credentials,
+        log: () => {},
+        sources: stubSources(makeVacancies(1)),
+      }),
+      /Не выбран ни один источник/,
+    );
   } finally {
     await telegram.close();
   }

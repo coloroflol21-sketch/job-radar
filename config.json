@@ -1,11 +1,12 @@
 {
+  "sources": ["trudvsem", "habr"],
   "queries": [
     { "text": "специалист технической поддержки", "region": "7700000000" },
     { "text": "техническая поддержка", "region": "7700000000" },
     { "text": "служба поддержки", "region": "7700000000" }
   ],
   "filters": {
-    "minSalary": 60000,
+    "minSalary": 80000,
     "requireSalary": false,
     "maxAgeDays": 3,
 

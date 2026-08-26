@@ -1,32 +1,39 @@
 /** Поиск новых вакансий и отправка дайджеста. */
 
-import { fetchVacancies } from './sources/trudvsem.js';
+import { SOURCES, planQueries, sourceLabel } from './sources/index.js';
 import { selectNew } from './filter.js';
 import { windowStart, saveState } from './state.js';
 import { sendDigest, formatVacancy } from './telegram.js';
 import { registerVacancies, pruneCatalog } from './catalog.js';
 
 /**
- * Один цикл поиска: опрашивает источник, отбирает новое, отправляет дайджест.
+ * Один цикл поиска: опрашивает источники, отбирает новое, отправляет дайджест.
  * Возвращает отправленные вакансии — вызывающий сам решает, что о них сказать.
  *
  * dryRun печатает найденное в консоль и не меняет состояние: так можно
  * проверить настройки фильтров, ничего не отправляя.
  */
-export async function scanVacancies(state, statePath, config, { credentials, dryRun = false, log = console.log, fetchVacanciesImpl = fetchVacancies } = {}) {
+export async function scanVacancies(state, statePath, config, { credentials, dryRun = false, log = console.log, sources = SOURCES } = {}) {
   const modifiedFrom = windowStart(state.lastRunAt, { fallbackDays: config.filters?.maxAgeDays ?? 3 });
   log(`Окно поиска: с ${modifiedFrom}`);
 
+  const tasks = planQueries(config.queries, config.sources ?? ['trudvsem']);
+  if (tasks.length === 0) throw new Error('Не выбран ни один источник вакансий');
+
   const results = await Promise.allSettled(
-    config.queries.map((query) =>
-      fetchVacanciesImpl(query, { perQuery: config.limits?.perQuery ?? 100, modifiedFrom }),
+    tasks.map(({ source, query }) =>
+      sources[source].fetch(query, {
+        perQuery: config.limits?.perQuery ?? 100,
+        modifiedFrom,
+        remoteOnly: config.filters?.remoteOnly ?? false,
+      }),
     ),
   );
 
   const collected = [];
   results.forEach((result, i) => {
-    const query = config.queries[i];
-    const label = `${query.text}@${query.region ?? 'все регионы'}`;
+    const { source, query } = tasks[i];
+    const label = `${sourceLabel(source)} / ${query.text}`;
     if (result.status === 'fulfilled') {
       log(`  ${label}: получено ${result.value.length}`);
       collected.push(...result.value);
@@ -36,7 +43,7 @@ export async function scanVacancies(state, statePath, config, { credentials, dry
   });
 
   if (results.every((result) => result.status === 'rejected')) {
-    throw new Error('Ни один запрос не выполнился, источник недоступен');
+    throw new Error('Ни один источник не ответил');
   }
 
   const limit = config.limits?.maxNotificationsPerRun ?? 12;

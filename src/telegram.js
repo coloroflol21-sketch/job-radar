@@ -27,8 +27,16 @@ export function formatVacancy(vacancy, index) {
   if (vacancy.region) lines.push(`📍 ${escapeHtml(vacancy.region)}`);
   if (vacancy.experienceYears) lines.push(`🎓 опыт от ${vacancy.experienceYears} лет`);
   if (vacancy.schedule) lines.push(`🕒 ${escapeHtml(vacancy.schedule)}`);
+  if (vacancy.employment) lines.push(`🏠 ${escapeHtml(vacancy.employment)}`);
   if (vacancy.url) lines.push(`<a href="${escapeHtml(vacancy.url)}">Открыть вакансию</a>`);
-  if (vacancy.code && vacancy.email) lines.push(`✍️ отклик: <code>/apply ${escapeHtml(vacancy.code)}</code>`);
+
+  if (vacancy.code && vacancy.email) {
+    lines.push(`✍️ отклик: <code>/apply ${escapeHtml(vacancy.code)}</code>`);
+  } else if (vacancy.url) {
+    // У источников без контактов откликнуться можно только на их сайте.
+    lines.push('✍️ отклик — на сайте вакансии');
+  }
+
   return lines.join('\n');
 }
 
