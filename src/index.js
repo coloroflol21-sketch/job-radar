@@ -98,6 +98,11 @@ async function main() {
     return;
   }
 
+  // «Проверить сейчас» и «Ещё вакансии» в одиночном режиме обслуживаются тем же
+  // поиском, который идёт ниже: отдельного прогона не нужно, достаточно
+  // подтвердить нажатие, чтобы кнопка не выглядела мёртвой.
+  let askedForScan = false;
+
   if (!args.dryRun && credentials.token && credentials.chatId) {
     try {
       const replies = await processInbox(state, args.state, credentials, {
@@ -107,6 +112,14 @@ async function main() {
           replyTo: process.env.SMTP_USER,
         },
         config,
+        onPreview: async () => {
+          askedForScan = true;
+          await sendMessage('🔄 Ищу вакансии, результат пришлю сюда же.', credentials).catch(() => {});
+        },
+        onMore: async () => {
+          askedForScan = true;
+          await sendMessage('➕ Смотрю, что ещё есть по вашим фильтрам.', credentials).catch(() => {});
+        },
       });
       if (replies.length > 0) console.log(`Обработано команд из чата: ${replies.length}`);
     } catch (error) {
@@ -127,8 +140,9 @@ async function main() {
       console.log('Новых подходящих вакансий нет.');
       // При запуске по расписанию каждые 5 минут сообщение о пустом результате
       // превратилось бы в 288 уведомлений в сутки. Пишем только когда причина
-      // в фильтрах: это единственный случай, где пользователь может что-то сделать.
-      if (collected > 0 && matching === 0 && credentials.token && credentials.chatId) {
+      // в фильтрах либо когда пользователь сам нажал кнопку и ждёт ответа.
+      const worthTelling = askedForScan || (collected > 0 && matching === 0);
+      if (worthTelling && credentials.token && credentials.chatId) {
         await sendMessage(emptyResultText({ collected, matching, active }), credentials).catch(() => {});
       }
     } else {

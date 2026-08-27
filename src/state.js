@@ -22,7 +22,6 @@ const EMPTY_STATE = {
   lastUpdateId: 0,
   nextCodeIndex: 0,
   saved: [],
-  queue: [],
   pendingApply: null,
   // На какую вакансию ждём текст письма: между нажатием кнопки и ответом
   // может пройти запуск по расписанию, поэтому поле обязано сохраняться.
@@ -43,7 +42,6 @@ export async function loadState(path) {
       // Счётчик кодов: только растёт, чтобы код не достался другой вакансии.
       nextCodeIndex: parsed.nextCodeIndex ?? Object.keys(parsed.catalog ?? {}).length,
       saved: Array.isArray(parsed.saved) ? parsed.saved : [],
-      queue: Array.isArray(parsed.queue) ? parsed.queue : [],
       pendingApply: parsed.pendingApply ?? null,
       awaitingLetter: parsed.awaitingLetter ?? null,
       sourceHealth: parsed.sourceHealth ?? {},

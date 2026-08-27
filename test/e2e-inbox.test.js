@@ -484,3 +484,33 @@ test('после /cancel обычный текст остаётся обычны
     await second.close();
   }
 });
+
+test('кнопки «Ещё» и «Проверить» отвечают и в одиночном режиме', async () => {
+  // В режиме Actions обработчиков поиска нет — кнопка молчала, и это выглядело
+  // как поломка бота. Теперь нажатие подтверждается сообщением.
+  const statePath = await tempStatePath();
+  const asked = [];
+
+  for (const [id, data] of [[60, 'go:more'], [61, 'act:preview']]) {
+    const telegram = await fakeTelegram([
+      { update_id: id, callback_query: { id: `cb-${id}`, data, message: { message_id: 3, chat: { id: 555 } } } },
+    ]);
+    try {
+      await processInbox(
+        stateWithCatalog(),
+        statePath,
+        { token: 'T', chatId: '555' },
+        {
+          fetchImpl: telegram.fetchImpl,
+          // Как в index.js: обработчики только подтверждают нажатие.
+          onMore: async () => asked.push('more'),
+          onPreview: async () => asked.push('preview'),
+        },
+      );
+    } finally {
+      await telegram.close();
+    }
+  }
+
+  assert.deepEqual(asked, ['more', 'preview'], 'оба нажатия дошли до обработчиков');
+});

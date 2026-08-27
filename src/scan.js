@@ -13,7 +13,7 @@ import { registerVacancies, pruneCatalog } from './catalog.js';
  * dryRun печатает найденное в консоль и не меняет состояние: так можно
  * проверить настройки фильтров, ничего не отправляя.
  */
-export async function scanVacancies(state, statePath, config, { credentials, dryRun = false, log = console.log, sources = SOURCES } = {}) {
+export async function scanVacancies(state, statePath, config, { credentials, dryRun = false, log = console.log, sources = SOURCES, sleep } = {}) {
   const modifiedFrom = windowStart(state.lastRunAt, { fallbackDays: config.filters?.maxAgeDays ?? 3 });
   log(`Окно поиска: с ${modifiedFrom}`);
 
@@ -52,17 +52,39 @@ export async function scanVacancies(state, statePath, config, { credentials, dry
   // Источник, который ответил 200, но не дал ни одной вакансии там, где обычно
   // даёт сотни, — сломался. Молча пустая выдача выглядела бы как «нет вакансий».
   state.sourceHealth ??= {};
+  const queryKey = JSON.stringify((config.queries ?? []).map((query) => query.text));
   const broken = [];
+
   results.forEach((result, i) => {
     if (result.status !== 'fulfilled') return;
     const { source } = tasks[i];
-    const health = state.sourceHealth[source] ?? { best: 0 };
     const count = result.value.length;
-    if (count > health.best) health.best = count;
-    // Порог 20% от лучшего результата: обычные колебания выдачи в него укладываются.
-    if (count === 0 && health.best >= 10) broken.push(sourceLabel(source));
+    const health = state.sourceHealth[source] ?? { best: 0, queryKey };
+
+    // Планка привязана к запросам: после их смены источник законно отдаёт
+    // другое количество, и старая планка вызывала ложные тревоги.
+    if (health.queryKey !== queryKey) {
+      health.best = 0;
+      health.queryKey = queryKey;
+    }
+
+    // Планка забывается со временем: выдача источника меняется сама по себе.
+    health.best = Math.max(count, Math.round((health.best ?? 0) * 0.5));
+
+    if (count === 0 && health.best >= 10) {
+      // Сообщаем один раз: при поиске каждые пять минут повторы превратились бы
+      // в поток одинаковых предупреждений, и на них перестали бы реагировать.
+      if (!health.reportedEmpty) {
+        broken.push(sourceLabel(source));
+        health.reportedEmpty = true;
+      }
+    } else if (count > 0) {
+      health.reportedEmpty = false;
+    }
+
     state.sourceHealth[source] = health;
   });
+
   if (broken.length > 0) {
     const unique = [...new Set(broken)];
     log(`  внимание: ${unique.join(', ')} ответили без ошибки, но не дали вакансий`);
@@ -106,7 +128,7 @@ export async function scanVacancies(state, statePath, config, { credentials, dry
 
   // Карточками, а не одним дайджестом: кнопки привязаны к сообщению,
   // поэтому у каждой вакансии должно быть своё.
-  const { delivered, error } = await sendVacancyCards(coded, credentials);
+  const { delivered, error } = await sendVacancyCards(coded, credentials, sleep ? { sleep } : {});
 
   // Отправленными считаем только дошедшие: иначе оборванная на середине
   // рассылка навсегда спрятала бы оставшиеся вакансии.
