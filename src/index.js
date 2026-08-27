@@ -16,7 +16,8 @@ import { loadEnv } from './env.js';
 import { loadState } from './state.js';
 import { processInbox } from './inbox.js';
 import { scanVacancies } from './scan.js';
-import { serve, announceOnline, announceOffline } from './serve.js';
+import { serve, announceOnline, announceOffline, emptyResultText, failureText } from './serve.js';
+import { sendMessage } from './telegram.js';
 import { createMailer } from './mailer.js';
 import { effectiveConfig } from './settings.js';
 
@@ -114,17 +115,29 @@ async function main() {
   }
 
   // Настройки из чата перекрывают config.json — читаем их после обработки команд.
-  const sent = await scanVacancies(state, args.state, effectiveConfig(config, state), {
+  const active = effectiveConfig(config, state);
+  const { sent, failures, collected, matching } = await scanVacancies(state, args.state, active, {
     credentials,
     dryRun: args.dryRun,
   });
 
   if (!args.dryRun) {
     if (sent.length === 0) {
-      console.log('Новых подходящих вакансий нет, уведомление не отправляется.');
+      console.log('Новых подходящих вакансий нет.');
+      // При запуске по расписанию каждые 5 минут сообщение о пустом результате
+      // превратилось бы в 288 уведомлений в сутки. Пишем только когда причина
+      // в фильтрах: это единственный случай, где пользователь может что-то сделать.
+      if (collected > 0 && matching === 0 && credentials.token && credentials.chatId) {
+        await sendMessage(emptyResultText({ collected, matching, active }), credentials).catch(() => {});
+      }
     } else {
       const withEmail = sent.filter((vacancy) => vacancy.email).length;
       console.log(`Отправлено вакансий: ${sent.length}, из них с email для отклика: ${withEmail}`);
+    }
+
+    // О сбое источника сообщаем всегда: молчание выглядело бы как «нет вакансий».
+    if (failures.length > 0 && credentials.token && credentials.chatId) {
+      await sendMessage(failureText(failures), credentials).catch(() => {});
     }
   }
 }

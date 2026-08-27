@@ -23,6 +23,47 @@ function mailSettings() {
 }
 
 /**
+ * Объясняет пустой результат: на каком шаге всё отсеялось.
+ * Без этого непонятно, фильтры слишком строгие или бот не работает.
+ */
+export function emptyResultText({ collected, matching, active }) {
+  const filters = active?.filters ?? {};
+  const lines = ['🔍 <b>Новых вакансий нет</b>', ''];
+
+  if (collected === 0) {
+    lines.push('Источники ничего не вернули по вашим запросам.');
+    lines.push('Проверьте поисковые фразы — возможно, они слишком узкие.');
+  } else if (matching === 0) {
+    lines.push(`Источники дали ${collected} вакансий, но ни одна не прошла фильтры.`);
+    lines.push('');
+    const reasons = [];
+    if (filters.minSalary > 0) reasons.push(`зарплата от ${filters.minSalary.toLocaleString('ru-RU')} ₽`);
+    if ((filters.titleKeywords ?? []).length > 0) reasons.push(`слова в названии: ${filters.titleKeywords.join(', ')}`);
+    if (filters.remoteOnly) reasons.push('только удалённо');
+    if ((filters.schedules ?? []).length > 0) reasons.push(`график: ${filters.schedules.join(', ')}`);
+    if (filters.maxExperienceYears !== null && filters.maxExperienceYears !== undefined) {
+      reasons.push(`опыт до ${filters.maxExperienceYears} лет`);
+    }
+    if (reasons.length > 0) lines.push(`Сейчас отсекают: ${reasons.join('; ')}.`);
+    lines.push('');
+    lines.push('Ослабить — <code>/settings</code>');
+  } else {
+    lines.push('Всё подходящее уже присылал раньше — повторно не отправляю.');
+  }
+
+  return lines.join('\n');
+}
+
+export function failureText(failures) {
+  const lines = ['⚠️ <b>Источник недоступен</b>', ''];
+  for (const failure of failures.slice(0, 5)) {
+    lines.push(`${failure.label}: ${failure.reason}`);
+  }
+  lines.push('', 'Остальные источники продолжают работать. Повторю при следующем поиске.');
+  return lines.join('\n');
+}
+
+/**
  * Запускает бота до сигнала остановки.
  * stopSignal — AbortSignal: по нему цикл завершается, не обрывая текущую команду.
  */
@@ -33,17 +74,40 @@ export async function serve(state, statePath, config, { credentials, stopSignal,
   log('Бот запущен. Команды: /settings, /help, /list, /preview, /apply, /sent');
   log(`Поиск вакансий — каждые ${scanIntervalMinutes} мин. Остановить — Ctrl+C.\n`);
 
+  // Чтобы не присылать «ничего не найдено» на каждый прогон, помним,
+  // сообщали ли об этом в прошлый раз.
+  let reportedEmpty = false;
+  let reportedFailure = '';
+
   /** Настройки из чата перекрывают config.json, поэтому читаем их каждый раз. */
-  const runScan = async () => {
+  const runScan = async ({ announce = true } = {}) => {
     const active = effectiveConfig(config, state);
-    const sent = await scan(state, statePath, active, { credentials, log });
+    const result = await scan(state, statePath, active, { credentials, log });
+    const { sent, failures, collected, matching, deferred } = result;
+
     if (sent.length > 0) {
       const withEmail = sent.filter((vacancy) => vacancy.email).length;
       log(`Отправлено вакансий: ${sent.length}, с адресом для отклика: ${withEmail}\n`);
+      reportedEmpty = false;
     } else {
       log('Новых подходящих вакансий нет.\n');
+      // Молчание неотличимо от «бот сломался», поэтому сообщаем — но один раз.
+      if (announce && !reportedEmpty) {
+        await sendMessage(emptyResultText({ collected, matching, active }), credentials).catch(() => {});
+        reportedEmpty = true;
+      }
     }
-    return sent;
+
+    // Сбой источника — это не «нет вакансий», о нём нужно знать отдельно.
+    const failureKey = failures.map((f) => f.label).join('|');
+    if (announce && failures.length > 0 && failureKey !== reportedFailure) {
+      await sendMessage(failureText(failures), credentials).catch(() => {});
+      reportedFailure = failureKey;
+    } else if (failures.length === 0) {
+      reportedFailure = '';
+    }
+
+    return { sent, deferred, matching };
   };
 
   while (!stopSignal.aborted) {
@@ -68,9 +132,16 @@ export async function serve(state, statePath, config, { credentials, stopSignal,
         signal: stopSignal,
         fetchImpl,
         // Кнопка «Проверить выдачу» в меню запускает поиск не дожидаясь таймера.
+        // Здесь отвечаем всегда: пользователь нажал и ждёт ответа.
         onPreview: async () => {
           lastScanAt = Date.now();
-          await runScan().catch((error) => log(`Поиск не удался: ${error.message}`));
+          reportedEmpty = false;
+          try {
+            await runScan();
+          } catch (error) {
+            log(`Поиск не удался: ${error.message}`);
+            await sendMessage(`❌ Поиск не удался: ${error.message}`, credentials).catch(() => {});
+          }
         },
       });
       if (replies.length > 0) log(`Ответов на команды: ${replies.length}`);

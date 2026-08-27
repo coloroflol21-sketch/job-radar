@@ -2,6 +2,7 @@
 
 import { fetchVacancies as fetchTrudvsem } from './trudvsem.js';
 import { fetchVacancies as fetchHabr } from './habr.js';
+import { fetchVacancies as fetchHh } from './hh.js';
 
 export const SOURCES = {
   trudvsem: {
@@ -10,10 +11,15 @@ export const SOURCES = {
     // Адрес работодателя есть у 76% вакансий — отклик уходит письмом из бота.
     supportsEmail: true,
   },
+  hh: {
+    label: 'hh.ru',
+    fetch: fetchHh,
+    // В RSS нет контактов: откликаться можно только на сайте.
+    supportsEmail: false,
+  },
   habr: {
     label: 'Хабр Карьера',
     fetch: fetchHabr,
-    // В RSS нет контактов: откликаться можно только на сайте.
     supportsEmail: false,
   },
 };

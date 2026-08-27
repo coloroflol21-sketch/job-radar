@@ -1,9 +1,9 @@
 {
-  "sources": ["trudvsem", "habr"],
+  "sources": ["trudvsem", "hh", "habr"],
   "queries": [
-    { "text": "специалист технической поддержки", "region": "7700000000" },
-    { "text": "техническая поддержка", "region": "7700000000" },
-    { "text": "служба поддержки", "region": "7700000000" }
+    { "text": "специалист технической поддержки", "region": "7700000000", "hhArea": 1 },
+    { "text": "техническая поддержка", "region": "7700000000", "hhArea": 1 },
+    { "text": "служба поддержки", "region": "7700000000", "hhArea": 1 }
   ],
   "filters": {
     "minSalary": 80000,
@@ -18,7 +18,7 @@
     "schedules": []
   },
   "limits": {
-    "perQuery": 100,
+    "perQuery": 200,
     "maxNotificationsPerRun": 12
   }
 }

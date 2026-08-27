@@ -86,15 +86,15 @@ test('повторное нажатие снимает отметку графи
 
 test('источники переключаются, но последний снять нельзя', () => {
   const state = {};
-  applyCallback('set:sources:1', config, state); // включаем habr
-  assert.deepEqual(state.settings.sources, ['trudvsem', 'habr']);
+  applyCallback('set:sources:1', config, state); // включаем hh
+  assert.deepEqual(state.settings.sources, ['trudvsem', 'hh']);
 
   applyCallback('set:sources:0', config, state); // выключаем trudvsem
-  assert.deepEqual(state.settings.sources, ['habr']);
+  assert.deepEqual(state.settings.sources, ['hh']);
 
   const result = applyCallback('set:sources:1', config, state); // пытаемся снять последний
   assert.match(result.notice, /хотя бы один/);
-  assert.deepEqual(state.settings.sources, ['habr'], 'поиск без источников невозможен');
+  assert.deepEqual(state.settings.sources, ['hh'], 'поиск без источников невозможен');
 });
 
 test('переключатель формата работы', () => {

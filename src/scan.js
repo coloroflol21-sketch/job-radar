@@ -31,6 +31,7 @@ export async function scanVacancies(state, statePath, config, { credentials, dry
   );
 
   const collected = [];
+  const failures = [];
   results.forEach((result, i) => {
     const { source, query } = tasks[i];
     const label = `${sourceLabel(source)} / ${query.text}`;
@@ -38,7 +39,9 @@ export async function scanVacancies(state, statePath, config, { credentials, dry
       log(`  ${label}: получено ${result.value.length}`);
       collected.push(...result.value);
     } else {
-      log(`  ${label}: ошибка — ${result.reason?.message ?? result.reason}`);
+      const reason = result.reason?.message ?? String(result.reason);
+      log(`  ${label}: ошибка — ${reason}`);
+      failures.push({ label, reason });
     }
   });
 
@@ -61,7 +64,7 @@ export async function scanVacancies(state, statePath, config, { credentials, dry
       state.lastRunAt = new Date().toISOString();
       await saveState(statePath, state);
     }
-    return [];
+    return { sent: [], collected: collected.length, matching: 0, deferred: 0, failures };
   }
 
   state.catalog ??= {};
@@ -72,7 +75,7 @@ export async function scanVacancies(state, statePath, config, { credentials, dry
     const withEmail = coded.filter((vacancy) => vacancy.email).length;
     log(`\n--- dry-run, сообщения не отправляются (с email: ${withEmail} из ${coded.length}) ---`);
     coded.forEach((vacancy, i) => log(`\n${formatVacancy(vacancy, i + 1)}`));
-    return coded;
+    return { sent: coded, collected: collected.length, matching: matching.length, deferred, failures };
   }
 
   await sendDigest(coded, credentials);
@@ -84,5 +87,5 @@ export async function scanVacancies(state, statePath, config, { credentials, dry
   state.totalSent = (state.totalSent ?? 0) + coded.length;
   await saveState(statePath, state);
 
-  return coded;
+  return { sent: coded, collected: collected.length, matching: matching.length, deferred, failures };
 }

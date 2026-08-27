@@ -89,7 +89,7 @@ test('лимит отправки не двигает окно поиска, п�
 
   try {
     // 10 подходящих вакансий при лимите 3.
-    const sent = await scanVacancies(state, statePath, config, {
+    const { sent } = await scanVacancies(state, statePath, config, {
       credentials: telegram.credentials,
       log: (line) => logs.push(line),
       sources: stubSources(makeVacancies(10)),
@@ -116,7 +116,7 @@ test('когда отправлено всё найденное, окно сдв
   const state = freshState();
 
   try {
-    const sent = await scanVacancies(state, statePath, config, {
+    const { sent } = await scanVacancies(state, statePath, config, {
       credentials: telegram.credentials,
       log: () => {},
       sources: stubSources(makeVacancies(2)),
@@ -136,17 +136,17 @@ test('отложенные вакансии приходят следующим 
   const pool = makeVacancies(7);
 
   try {
-    const first = await scanVacancies(state, statePath, config, {
+    const { sent: first } = await scanVacancies(state, statePath, config, {
       credentials: telegram.credentials,
       log: () => {},
       sources: stubSources(pool),
     });
-    const second = await scanVacancies(state, statePath, config, {
+    const { sent: second } = await scanVacancies(state, statePath, config, {
       credentials: telegram.credentials,
       log: () => {},
       sources: stubSources(pool),
     });
-    const third = await scanVacancies(state, statePath, config, {
+    const { sent: third } = await scanVacancies(state, statePath, config, {
       credentials: telegram.credentials,
       log: () => {},
       sources: stubSources(pool),
@@ -173,7 +173,7 @@ test('повторный запуск не присылает те же вака
       log: () => {},
       sources: stubSources(pool),
     });
-    const again = await scanVacancies(state, statePath, config, {
+    const { sent: again } = await scanVacancies(state, statePath, config, {
       credentials: telegram.credentials,
       log: () => {},
       sources: stubSources(pool),
@@ -246,7 +246,7 @@ test('вакансии собираются из всех включённых �
   };
 
   try {
-    const sent = await scanVacancies(
+    const { sent } = await scanVacancies(
       freshState(),
       statePath,
       { ...config, sources: ['trudvsem', 'habr'] },
@@ -272,7 +272,7 @@ test('падение одного источника не отменяет вт�
   };
 
   try {
-    const sent = await scanVacancies(
+    const { sent } = await scanVacancies(
       freshState(),
       statePath,
       { ...config, sources: ['trudvsem', 'habr'] },

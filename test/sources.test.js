@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 
 import { planQueries, sourceNames, sourceLabel, SOURCES } from '../src/sources/index.js';
 
-test('в реестре оба источника', () => {
-  assert.deepEqual(sourceNames().sort(), ['habr', 'trudvsem']);
+test('в реестре все три источника', () => {
+  assert.deepEqual(sourceNames().sort(), ['habr', 'hh', 'trudvsem']);
 });
 
 test('у источников есть человеческие названия', () => {
