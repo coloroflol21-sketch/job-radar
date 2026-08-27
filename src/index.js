@@ -20,6 +20,7 @@ import { serve, announceOnline, announceOffline, emptyResultText, failureText, r
 import { sendMessage } from './telegram.js';
 import { createMailer } from './mailer.js';
 import { effectiveConfig } from './settings.js';
+import { checkReplies } from './replies.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -149,6 +150,10 @@ async function main() {
       const withEmail = sent.filter((vacancy) => vacancy.email).length;
       console.log(`Отправлено вакансий: ${sent.length}, из них с email для отклика: ${withEmail}`);
     }
+
+    // Ответы работодателей: проверяем после поиска, чтобы сбой почты
+    // не помешал прислать вакансии.
+    await checkReplies(state, args.state, credentials);
 
     // О сбое источника сообщаем всегда: молчание выглядело бы как «нет вакансий».
     if (failures.length > 0 && credentials.token && credentials.chatId) {

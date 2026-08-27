@@ -10,6 +10,7 @@ import { createMailer } from './mailer.js';
 import { effectiveConfig } from './settings.js';
 import { homeScreen } from './menu.js';
 import { BOT_COMMANDS } from './commands.js';
+import { checkReplies } from './replies.js';
 
 /** Telegram держит соединение до 50 секунд; больше не имеет смысла. */
 const POLL_TIMEOUT_SECONDS = 30;
@@ -121,6 +122,10 @@ export async function serve(state, statePath, config, { credentials, stopSignal,
       } catch (error) {
         log(`Поиск не удался: ${error.message}`);
       }
+      if (stopSignal.aborted) break;
+
+      // Заодно смотрим, не ответил ли кто-то на отклики.
+      await checkReplies(state, statePath, credentials, { log });
       if (stopSignal.aborted) break;
     }
 

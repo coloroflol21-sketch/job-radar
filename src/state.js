@@ -27,6 +27,8 @@ const EMPTY_STATE = {
   // может пройти запуск по расписанию, поэтому поле обязано сохраняться.
   awaitingLetter: null,
   sourceHealth: {},
+  // Идентификаторы ответов работодателей, о которых уже сообщили.
+  seenReplies: [],
 };
 
 export async function loadState(path) {
@@ -45,6 +47,7 @@ export async function loadState(path) {
       pendingApply: parsed.pendingApply ?? null,
       awaitingLetter: parsed.awaitingLetter ?? null,
       sourceHealth: parsed.sourceHealth ?? {},
+      seenReplies: Array.isArray(parsed.seenReplies) ? parsed.seenReplies : [],
       settings: parsed.settings,
     };
   } catch (error) {
@@ -59,6 +62,7 @@ export async function saveState(path, state) {
     ...state,
     sentIds: state.sentIds.slice(-MAX_REMEMBERED_IDS),
     sentLog: (state.sentLog ?? []).slice(-MAX_SENT_LOG),
+    seenReplies: (state.seenReplies ?? []).slice(-MAX_SENT_LOG),
   };
   await writeFile(path, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 }
