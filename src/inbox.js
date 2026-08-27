@@ -16,6 +16,7 @@ import { handleCommands, confirmApply } from './handler.js';
 import { applyCallback, homeScreen } from './menu.js';
 import { findByCode } from './catalog.js';
 import { saveState } from './state.js';
+import { takeAwaitingLetter, expiredLetterText, LETTER_TTL_MINUTES } from './pending.js';
 
 /** Отправляет ответ: строка — обычный текст, объект — текст с клавиатурой. */
 async function reply(item, credentials) {
@@ -48,7 +49,7 @@ async function runVacancyAction(action, code, state, { credentials, fetchImpl, n
     if (!entry.email) return `У вакансии ${code} нет адреса — откликнуться можно только на сайте.`;
 
     // Запоминаем, на что отвечаем: следующее сообщение станет текстом письма.
-    state.awaitingLetter = { code, askedAt: new Date().toISOString() };
+    state.awaitingLetter = { code, askedAt: now().toISOString() };
     await askForReply(
       [
         `✍️ <b>Отклик на «${entry.title}»</b>`,
@@ -56,6 +57,8 @@ async function runVacancyAction(action, code, state, { credentials, fetchImpl, n
         '',
         'Напишите текст письма ответом на это сообщение.',
         'Перед отправкой я покажу письмо и спрошу подтверждение.',
+        '',
+        `Жду ${LETTER_TTL_MINUTES} минут. Передумали — <code>/cancel</code>`,
       ].join('\n'),
       { ...credentials, fetchImpl },
     );
@@ -89,11 +92,18 @@ export async function processInbox(state, statePath, credentials, { createTransp
 
   // Если бот ждёт текст письма, первое сообщение без слеша — это письмо,
   // а не команда: пользователь нажал «Откликнуться» и пишет ответ.
+  // Ожидание живёт ограниченное время: иначе случайный текст, написанный
+  // через час, ушёл бы работодателю письмом.
   const commands = [];
+  const notices = [];
   for (const message of messages) {
-    const waiting = state.awaitingLetter;
-    if (waiting && !message.text.trim().startsWith('/')) {
-      state.awaitingLetter = null;
+    const isCommand = message.text.trim().startsWith('/');
+    if (state.awaitingLetter && !isCommand) {
+      const waiting = takeAwaitingLetter(state, now());
+      if (waiting.expired) {
+        notices.push(expiredLetterText(waiting.code));
+        continue;
+      }
       commands.push({ type: 'apply', code: waiting.code, body: message.text.trim() });
       continue;
     }
@@ -109,6 +119,12 @@ export async function processInbox(state, statePath, credentials, { createTransp
   await confirmUpdates({ token: credentials.token, lastUpdateId: highest, fetchImpl });
 
   const replies = [];
+
+  // Сообщения о просроченных ожиданиях — до выполнения команд.
+  for (const notice of notices) {
+    await sendMessage(notice, { ...credentials, fetchImpl });
+    replies.push(notice);
+  }
 
   // Нажатия кнопок: подтверждение отклика либо настройка с перерисовкой меню.
   for (const callback of callbacks) {

@@ -2,6 +2,11 @@
 
 const TELEGRAM_LIMIT = 4096;
 
+/** Пауза между сообщениями в одном чате: Telegram пропускает примерно одно в секунду. */
+const CARD_INTERVAL_MS = 1100;
+
+const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 function escapeHtml(text) {
   return String(text)
     .replace(/&/g, '&amp;')
@@ -87,17 +92,38 @@ export function vacancyKeyboard(vacancy) {
  * Каждая вакансия — отдельное сообщение со своими кнопками.
  * Слить их в один дайджест нельзя: кнопки привязаны к сообщению, а не к строке.
  */
-export async function sendVacancyCards(vacancies, credentials) {
+export async function sendVacancyCards(vacancies, credentials, { sleep = defaultSleep } = {}) {
   await sendMessage(`🎯 <b>Новые вакансии: ${vacancies.length}</b>`, credentials);
+
+  const delivered = [];
   for (const vacancy of vacancies) {
-    await sendMessage(formatVacancy(vacancy, 0, { withHints: false }), {
-      ...credentials,
-      keyboard: vacancyKeyboard(vacancy),
-    });
+    try {
+      await sendMessage(formatVacancy(vacancy, 0, { withHints: false }), {
+        ...credentials,
+        keyboard: vacancyKeyboard(vacancy),
+        sleep,
+      });
+      delivered.push(vacancy);
+    } catch (error) {
+      // Возвращаем дошедшие: недоставленные не должны попасть в «отправленные»,
+      // иначе пользователь не увидит их уже никогда.
+      return { delivered, error };
+    }
+    // Пауза между карточками, чтобы не упираться в ограничение частоты.
+    if (vacancy !== vacancies.at(-1)) await sleep(CARD_INTERVAL_MS);
   }
+
+  return { delivered, error: null };
 }
 
-export async function sendMessage(text, { token, chatId, keyboard, fetchImpl = fetch } = {}) {
+/**
+ * Отправляет сообщение, переживая ограничение частоты.
+ *
+ * Telegram при потоке в один чат пропускает примерно одно сообщение в секунду
+ * и отвечает 429 с полем retry_after. Дайджест карточками — это 13 сообщений
+ * подряд, поэтому без повтора часть вакансий просто не дошла бы.
+ */
+export async function sendMessage(text, { token, chatId, keyboard, fetchImpl = fetch, retries = 4, sleep = defaultSleep } = {}) {
   if (!token || !chatId) throw new Error('Не заданы TELEGRAM_BOT_TOKEN или TELEGRAM_CHAT_ID');
 
   const body = {
@@ -108,15 +134,30 @@ export async function sendMessage(text, { token, chatId, keyboard, fetchImpl = f
   };
   if (keyboard) body.reply_markup = { inline_keyboard: keyboard };
 
-  const response = await fetchImpl(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  let lastDescription = '';
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    const response = await fetchImpl(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
 
-  const payload = await response.json();
-  if (!payload.ok) throw new Error(`Telegram: ${payload.description ?? response.status}`);
-  return payload;
+    const payload = await response.json();
+    if (payload.ok) return payload;
+
+    lastDescription = payload.description ?? String(response.status);
+    const retryAfter = payload.parameters?.retry_after;
+
+    // Ждём столько, сколько просит Telegram, иначе повтор снова упрётся в лимит.
+    if (retryAfter !== undefined && attempt < retries) {
+      await sleep((retryAfter + 1) * 1000);
+      continue;
+    }
+    // Прочие ошибки (неверный чат, битая разметка) повторять бессмысленно.
+    break;
+  }
+
+  throw new Error(`Telegram: ${lastDescription}`);
 }
 
 /**

@@ -9,8 +9,12 @@
 /** Без похожих на цифры I и O, чтобы код нельзя было прочитать двояко. */
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 
-/** Каталог хранит вакансии на время, пока отклик ещё осмыслен. */
-const CATALOG_TTL_DAYS = 14;
+/**
+ * Каталог хранит вакансии на время, пока отклик ещё осмыслен.
+ * Неделя — компромисс: состояние читается каждые пять минут, а откликаться
+ * на вакансию старше недели уже поздно. Избранное и отклики живут дольше.
+ */
+const CATALOG_TTL_DAYS = 7;
 
 export function normalizeCode(input) {
   return String(input ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -66,7 +70,10 @@ export function registerVacancies(catalog, vacancies, now = new Date(), counter 
       schedule: vacancy.schedule ?? '',
       employment: vacancy.employment ?? '',
       experienceYears: vacancy.experienceYears ?? 0,
-      description: (vacancy.description ?? '').slice(0, 1500),
+      // Описание храним коротким: полный текст на 1500 символов у каждой из
+      // тысяч вакансий раздувал состояние до десятков мегабайт, а оно читается
+      // и пишется каждые пять минут. Для решения хватает первых строк.
+      description: (vacancy.description ?? '').slice(0, 400),
       source: vacancy.source ?? 'trudvsem',
       addedAt: now.toISOString(),
     };

@@ -72,6 +72,8 @@ export function parseCommand(text) {
       return { type: 'settings' };
     case 'menu':
       return { type: 'menu' };
+    case 'cancel':
+      return { type: 'cancel' };
     case 'keywords':
       // Слова перечисляются через запятую в той же строке.
       return {

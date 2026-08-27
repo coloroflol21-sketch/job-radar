@@ -106,14 +106,26 @@ export async function scanVacancies(state, statePath, config, { credentials, dry
 
   // Карточками, а не одним дайджестом: кнопки привязаны к сообщению,
   // поэтому у каждой вакансии должно быть своё.
-  await sendVacancyCards(coded, credentials);
+  const { delivered, error } = await sendVacancyCards(coded, credentials);
 
-  state.sentIds = [...state.sentIds, ...coded.map((vacancy) => vacancy.id)];
+  // Отправленными считаем только дошедшие: иначе оборванная на середине
+  // рассылка навсегда спрятала бы оставшиеся вакансии.
+  state.sentIds = [...state.sentIds, ...delivered.map((vacancy) => vacancy.id)];
   // Окно сдвигаем только когда отправили всё найденное. Иначе отложенные лимитом
   // вакансии выпали бы из следующего окна поиска и не пришли бы уже никогда.
-  if (deferred === 0) state.lastRunAt = new Date().toISOString();
-  state.totalSent = (state.totalSent ?? 0) + coded.length;
+  if (deferred === 0 && !error) state.lastRunAt = new Date().toISOString();
+  state.totalSent = (state.totalSent ?? 0) + delivered.length;
   await saveState(statePath, state);
 
-  return { sent: coded, collected: collected.length, matching: matching.length, deferred, failures };
+  if (error) {
+    log(`Доставлено ${delivered.length} из ${coded.length}, дальше сбой: ${error.message}`);
+  }
+
+  return {
+    sent: delivered,
+    collected: collected.length,
+    matching: matching.length,
+    deferred: deferred + (coded.length - delivered.length),
+    failures,
+  };
 }

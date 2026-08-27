@@ -6,6 +6,7 @@ import { sendApplication } from './mailer.js';
 import { buildScreen, homeScreen } from './menu.js';
 import { updateSetting } from './settings.js';
 import { escapeHtml, renderVacancy, renderSaved, renderStats } from './views.js';
+import { takePendingApply, expiredConfirmText } from './pending.js';
 
 function renderList(catalog) {
   const entries = Object.entries(catalog).sort(
@@ -60,12 +61,14 @@ function renderConfirmation(entry, body) {
  * Возвращает текст ответа; state изменяется на месте.
  */
 export async function confirmApply(code, state, { transport, from, replyTo, now = () => new Date() } = {}) {
-  const pending = state.pendingApply;
-  state.pendingApply = null;
+  const taken = takePendingApply(state, code, now());
 
-  if (!pending || pending.code !== code) {
+  if (taken.missing) {
     return '⚠️ Нечего подтверждать — подготовьте отклик заново командой <code>/apply КОД</code>';
   }
+  // Устаревшее подтверждение не исполняем: человек мог давно забыть, о чём речь.
+  if (taken.expired) return expiredConfirmText(code);
+  const { pending } = taken;
 
   const entry = findByCode(state.catalog, code);
   const check = validateApply({ code, body: pending.body }, entry, state.sentLog);
@@ -180,6 +183,19 @@ export async function handleCommands(commands, state, { transport, from, replyTo
       case 'menu': {
         const screen = homeScreen(state);
         replies.push({ text: screen.text, keyboard: screen.keyboard });
+        break;
+      }
+
+      case 'cancel': {
+        const hadLetter = Boolean(state.awaitingLetter);
+        const hadPending = Boolean(state.pendingApply);
+        state.awaitingLetter = null;
+        state.pendingApply = null;
+        replies.push(
+          hadLetter || hadPending
+            ? '✖️ Отменено. Письмо не отправлено, ваши сообщения снова обычный текст.'
+            : 'Нечего отменять.',
+        );
         break;
       }
 

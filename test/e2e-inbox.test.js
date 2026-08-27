@@ -419,3 +419,68 @@ test('обычный текст без ожидания письма не счи
     await telegram.close();
   }
 });
+
+test('текст после истечения срока НЕ уходит письмом', async () => {
+  const statePath = await tempStatePath();
+  const mailed = [];
+  const transport = { sendMail: async (m) => { mailed.push(m); return { messageId: '<x>' }; } };
+
+  // Ожидание письма поставлено час назад — человек давно занят другим.
+  const state = stateWithCatalog();
+  state.awaitingLetter = { code: 'A1', askedAt: new Date(Date.now() - 60 * 60_000).toISOString() };
+
+  const telegram = await fakeTelegram([message(50, 'Спасибо, посмотрю позже')]);
+  try {
+    await run(state, statePath, telegram, transport);
+
+    assert.equal(mailed.length, 0, 'случайный текст не должен уйти работодателю');
+    assert.match(telegram.sentMessages[0].text, /Время на письмо истекло/);
+
+    const saved = await loadState(statePath);
+    assert.equal(saved.awaitingLetter, null, 'ожидание снято');
+    assert.equal(saved.pendingApply ?? null, null, 'подтверждения не готовилось');
+  } finally {
+    await telegram.close();
+  }
+});
+
+test('/cancel снимает ожидание письма', async () => {
+  const statePath = await tempStatePath();
+  const state = stateWithCatalog();
+  state.awaitingLetter = { code: 'A1', askedAt: new Date().toISOString() };
+
+  const telegram = await fakeTelegram([message(51, '/cancel')]);
+  try {
+    await run(state, statePath, telegram, null);
+    assert.match(telegram.sentMessages[0].text, /Отменено/);
+
+    const saved = await loadState(statePath);
+    assert.equal(saved.awaitingLetter, null);
+  } finally {
+    await telegram.close();
+  }
+});
+
+test('после /cancel обычный текст остаётся обычным текстом', async () => {
+  const statePath = await tempStatePath();
+  const state = stateWithCatalog();
+  state.awaitingLetter = { code: 'A1', askedAt: new Date().toISOString() };
+
+  const first = await fakeTelegram([message(52, '/cancel')]);
+  try {
+    await run(state, statePath, first, null);
+  } finally {
+    await first.close();
+  }
+
+  const mailed = [];
+  const transport = { sendMail: async (m) => { mailed.push(m); return { messageId: '<x>' }; } };
+  const second = await fakeTelegram([message(53, 'какой-то текст')]);
+  try {
+    await run(await loadState(statePath), statePath, second, transport);
+    assert.equal(mailed.length, 0);
+    assert.equal(second.sentMessages.length, 0, 'болтовня игнорируется');
+  } finally {
+    await second.close();
+  }
+});
