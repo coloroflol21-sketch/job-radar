@@ -17,6 +17,7 @@ import { loadState } from '../src/state.js';
 /** Фейковый Telegram: отдаёт заданные апдейты и записывает отправленное. */
 async function fakeTelegram(updates) {
   const sentMessages = [];
+  const edited = [];
   const offsets = [];
 
   const server = createServer((req, res) => {
@@ -42,6 +43,28 @@ async function fakeTelegram(updates) {
       return;
     }
 
+    // Нажатие кнопки правит существующее сообщение и гасит «часики».
+    if (url.pathname.endsWith('/editMessageText')) {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        edited.push(JSON.parse(body));
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ ok: true, result: { message_id: 5 } }));
+      });
+      return;
+    }
+
+    if (url.pathname.endsWith('/answerCallbackQuery')) {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ ok: true, result: true }));
+      });
+      return;
+    }
+
     res.statusCode = 404;
     res.end('{"ok":false,"description":"not found"}');
   });
@@ -51,6 +74,7 @@ async function fakeTelegram(updates) {
 
   return {
     sentMessages,
+    edited,
     offsets,
     close: () => new Promise((resolve) => server.close(resolve)),
     /** fetch, подменяющий адрес Telegram на локальный сервер. */
@@ -117,20 +141,79 @@ test('сквозной цикл: /apply отправляет письмо и п�
   try {
     await run(state, statePath, telegram, transport);
 
-    assert.equal(mailed.length, 1, 'письмо отправлено');
-    assert.equal(mailed[0].to, 'hr@example.com');
-    assert.match(mailed[0].subject, /Python разработчик/);
-    assert.match(mailed[0].text, /Иванова Мария, здравствуйте!/);
-
-    assert.equal(telegram.sentMessages.length, 1, 'ответ ушёл в чат');
-    assert.match(telegram.sentMessages[0].text, /Отклик отправлен/);
-    assert.equal(telegram.sentMessages[0].chat_id, '555');
+    // Письмо необратимо, поэтому сначала только показ и кнопки.
+    assert.equal(mailed.length, 0, 'без подтверждения письмо не уходит');
+    assert.equal(telegram.sentMessages.length, 1);
+    assert.match(telegram.sentMessages[0].text, /Проверьте письмо перед отправкой/);
+    assert.match(telegram.sentMessages[0].text, /hr@example\.com/);
+    assert.ok(telegram.sentMessages[0].reply_markup, 'должны быть кнопки');
 
     const saved = await loadState(statePath);
-    assert.equal(saved.sentLog.length, 1, 'отклик записан в журнал на диске');
+    assert.equal(saved.pendingApply.code, 'A1', 'отклик ждёт подтверждения');
+    assert.equal(saved.sentLog.length, 0);
     assert.equal(saved.lastUpdateId, 10, 'апдейт подтверждён');
   } finally {
     await telegram.close();
+  }
+});
+
+test('нажатие «Отправить» отправляет письмо и правит сообщение', async () => {
+  const prepare = await fakeTelegram([message(11, '/apply A1\nЗдравствуйте! Заинтересовала ваша вакансия, готов обсудить детали.')]);
+  const mailed = [];
+  const transport = { sendMail: async (m) => { mailed.push(m); return { messageId: '<x>', accepted: [m.to] }; } };
+  const statePath = await tempStatePath();
+  const state = stateWithCatalog();
+
+  try {
+    await run(state, statePath, prepare, transport);
+  } finally {
+    await prepare.close();
+  }
+
+  const confirm = await fakeTelegram([
+    { update_id: 12, callback_query: { id: 'cb-12', data: 'apply:yes:A1', message: { message_id: 5, chat: { id: 555 } } } },
+  ]);
+
+  try {
+    await run(await loadState(statePath), statePath, confirm, transport);
+
+    assert.equal(mailed.length, 1, 'после подтверждения письмо ушло');
+    assert.equal(mailed[0].to, 'hr@example.com');
+    assert.match(mailed[0].text, /Иванова Мария, здравствуйте!/);
+
+    const saved = await loadState(statePath);
+    assert.equal(saved.sentLog.length, 1, 'записано в журнал');
+    assert.equal(saved.pendingApply, null, 'подтверждение одноразовое');
+  } finally {
+    await confirm.close();
+  }
+});
+
+test('нажатие «Отменить» не отправляет письмо', async () => {
+  const prepare = await fakeTelegram([message(20, '/apply A1\nЗдравствуйте! Заинтересовала ваша вакансия, готов обсудить детали.')]);
+  const mailed = [];
+  const transport = { sendMail: async (m) => { mailed.push(m); return { messageId: '<x>' }; } };
+  const statePath = await tempStatePath();
+
+  try {
+    await run(stateWithCatalog(), statePath, prepare, transport);
+  } finally {
+    await prepare.close();
+  }
+
+  const cancel = await fakeTelegram([
+    { update_id: 21, callback_query: { id: 'cb-21', data: 'apply:no:0', message: { message_id: 5, chat: { id: 555 } } } },
+  ]);
+
+  try {
+    await run(await loadState(statePath), statePath, cancel, transport);
+
+    assert.equal(mailed.length, 0, 'письмо не ушло');
+    const saved = await loadState(statePath);
+    assert.equal(saved.pendingApply, null, 'ожидание снято');
+    assert.equal(saved.sentLog.length, 0);
+  } finally {
+    await cancel.close();
   }
 });
 
@@ -186,8 +269,10 @@ test('несколько команд в одном запуске выполн�
     const replies = await run(stateWithCatalog(), statePath, telegram, transport);
     assert.equal(replies.length, 3);
     assert.equal(telegram.sentMessages.length, 3);
-    assert.match(telegram.sentMessages[1].text, /Отклик отправлен/);
-    assert.match(telegram.sentMessages[2].text, /A1/);
+    // Отклик показывается для подтверждения, а не отправляется сразу.
+    assert.match(telegram.sentMessages[1].text, /Проверьте письмо перед отправкой/);
+    // Журнал пуст: письмо ещё не подтверждено.
+    assert.match(telegram.sentMessages[2].text, /не было/);
   } finally {
     await telegram.close();
   }

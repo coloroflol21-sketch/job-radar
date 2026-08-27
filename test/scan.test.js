@@ -323,3 +323,46 @@ test('пустой список источников — понятная оши
     await telegram.close();
   }
 });
+
+test('источник, ответивший 200 без вакансий, помечается сломанным', async () => {
+  const telegram = await fakeTelegram();
+  const statePath = await tempStatePath();
+  const state = freshState();
+  // Первый прогон: источник работает и задаёт «норму».
+  const working = stubSources(makeVacancies(50));
+  await scanVacancies(state, statePath, config, {
+    credentials: telegram.credentials,
+    log: () => {},
+    sources: working,
+  });
+
+  // Второй: тот же источник отвечает без ошибки, но пусто — это поломка.
+  const empty = { trudvsem: { label: 'Работа в России', supportsEmail: true, fetch: async () => [] } };
+  try {
+    const { failures } = await scanVacancies(state, statePath, config, {
+      credentials: telegram.credentials,
+      log: () => {},
+      sources: empty,
+    });
+
+    assert.equal(failures.length, 1, 'молча пустая выдача выглядела бы как «нет вакансий»');
+    assert.match(failures[0].reason, /не вернул ни одной вакансии/);
+  } finally {
+    await telegram.close();
+  }
+});
+
+test('пустая выдача у источника без истории поломкой не считается', async () => {
+  const telegram = await fakeTelegram();
+  const empty = { trudvsem: { label: 'Работа в России', supportsEmail: true, fetch: async () => [] } };
+  try {
+    const { failures } = await scanVacancies(freshState(), await tempStatePath(), config, {
+      credentials: telegram.credentials,
+      log: () => {},
+      sources: empty,
+    });
+    assert.deepEqual(failures, [], 'узкий запрос — это не сбой');
+  } finally {
+    await telegram.close();
+  }
+});

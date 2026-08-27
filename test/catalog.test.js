@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { registerVacancies, findByCode, pruneCatalog, normalizeCode } from '../src/catalog.js';
+import { registerVacancies, findByCode, pruneCatalog, normalizeCode, codeForIndex } from '../src/catalog.js';
 
 function vacancy(id, overrides = {}) {
   return {
@@ -60,14 +60,62 @@ test('в каталог попадают данные, нужные для от�
   assert.ok(entry.addedAt);
 });
 
-test('переполненный каталог переиспользует самую давнюю запись', () => {
+test('код НИКОГДА не достаётся другой вакансии', () => {
+  // Раньше кодов было 216 и они переиспользовались: ответ /apply на старое
+  // сообщение отправлял письмо не тому работодателю.
   const catalog = {};
-  const old = new Date(Date.now() - 20 * 86_400_000);
-  // 24 буквы по 9 цифр = 216 кодов
-  registerVacancies(catalog, Array.from({ length: 216 }, (_, i) => vacancy(`id-${i}`)), old);
-  const [overflow] = registerVacancies(catalog, [vacancy('overflow')]);
-  assert.ok(overflow.code, 'код всё равно выдан');
-  assert.equal(catalog[overflow.code].id, 'overflow');
+  const counter = {};
+  const codes = [];
+
+  for (let batch = 0; batch < 50; batch += 1) {
+    const vacancies = Array.from({ length: 12 }, (_, i) => vacancy(`id-${batch * 12 + i}`));
+    codes.push(...registerVacancies(catalog, vacancies, new Date(), counter).map((v) => v.code));
+  }
+
+  assert.equal(codes.length, 600);
+  assert.equal(new Set(codes).size, 600, 'ни один код не повторился');
+  assert.equal(findByCode(catalog, 'A1').id, 'id-0', 'A1 всё ещё первая вакансия');
+});
+
+test('после 216 кодов буквы удваиваются', () => {
+  assert.equal(codeForIndex(0), 'A1');
+  assert.equal(codeForIndex(215), 'Z9');
+  assert.equal(codeForIndex(216), 'AA1');
+  assert.equal(codeForIndex(1000), 'DR2');
+});
+
+test('счётчик кодов продолжается после чистки каталога', () => {
+  const catalog = {};
+  const counter = {};
+  registerVacancies(catalog, [vacancy('a'), vacancy('b')], new Date(), counter);
+  // Каталог опустошён по TTL, но счётчик помнит выданные номера.
+  delete catalog.A1;
+  delete catalog.A2;
+  const [next] = registerVacancies(catalog, [vacancy('c')], new Date(), counter);
+  assert.equal(next.code, 'A3', 'старые коды не выдаются заново');
+});
+
+test('в каталог попадают данные для показа описания', () => {
+  const catalog = {};
+  registerVacancies(catalog, [
+    { ...vacancy('a'), region: 'Москва', salaryMin: 100000, schedule: 'Полный день', description: 'Текст', source: 'hh' },
+  ]);
+  const saved = catalog.A1;
+  assert.equal(saved.region, 'Москва');
+  assert.equal(saved.salaryMin, 100000);
+  assert.equal(saved.description, 'Текст');
+  assert.equal(saved.source, 'hh');
+});
+
+test('избранное и отклики не удаляются по TTL', () => {
+  const old = new Date(Date.now() - 20 * 86_400_000).toISOString();
+  const catalog = {
+    A1: { id: 'saved', addedAt: old },
+    A2: { id: 'applied', addedAt: old },
+    A3: { id: 'plain', addedAt: old },
+  };
+  pruneCatalog(catalog, new Date(), { keepCodes: ['A1', 'A2'] });
+  assert.deepEqual(Object.keys(catalog).sort(), ['A1', 'A2'], 'к избранному ещё вернутся');
 });
 
 test('findByCode нечувствителен к регистру и пробелам', () => {

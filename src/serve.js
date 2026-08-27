@@ -143,6 +143,18 @@ export async function serve(state, statePath, config, { credentials, stopSignal,
             await sendMessage(`❌ Поиск не удался: ${error.message}`, credentials).catch(() => {});
           }
         },
+        // /more — прислать следующую пачку из очереди, не дожидаясь таймера.
+        onMore: async () => {
+          reportedEmpty = false;
+          try {
+            const { sent, deferred } = await runScan();
+            if (sent.length > 0 && deferred > 0) {
+              await sendMessage(`В очереди осталось ${deferred}. Ещё — <code>/more</code>`, credentials).catch(() => {});
+            }
+          } catch (error) {
+            await sendMessage(`❌ Поиск не удался: ${error.message}`, credentials).catch(() => {});
+          }
+        },
       });
       if (replies.length > 0) log(`Ответов на команды: ${replies.length}`);
     } catch (error) {

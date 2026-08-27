@@ -9,17 +9,22 @@ import { normalizeCode } from './catalog.js';
 export const HELP_TEXT = [
   '<b>Job Radar — команды</b>',
   '',
-  '<code>/settings</code> — настройки поиска кнопками',
-  '<code>/list</code> — вакансии, доступные для отклика',
-  '<code>/preview A1</code> — контакты и адрес отклика',
-  '<code>/apply A1</code> + текст письма с новой строки — отправить отклик',
-  '<code>/keywords поддержк, helpdesk</code> — ключевые слова в названии',
-  '<code>/sent</code> — история отправленных откликов',
-  '<code>/help</code> — эта справка',
+  '<b>Поиск</b>',
+  '<code>/settings</code> — настройки кнопками',
+  '<code>/keywords поддержк, helpdesk</code> — слова в названии',
+  '<code>/more</code> — прислать ещё из очереди',
+  '<code>/stats</code> — сводка по рынку',
   '',
-  'Пример отклика:',
-  '<code>/apply A1</code>',
-  '<code>Здравствуйте! Заинтересовала вакансия...</code>',
+  '<b>Вакансии</b>',
+  '<code>/list</code> — что доступно для отклика',
+  '<code>/show A1</code> — описание вакансии целиком',
+  '<code>/preview A1</code> — куда уйдёт отклик',
+  '<code>/save A1</code> — в избранное, <code>/saved</code> — список',
+  '',
+  '<b>Отклик</b>',
+  '<code>/apply A1</code> и текст письма со второй строки.',
+  'Бот покажет письмо и спросит подтверждение кнопкой.',
+  '<code>/sent</code> — история отправленных',
   '',
   'В режиме живого бота ответ приходит сразу, при запуске по расписанию —',
   'при следующем прогоне.',
@@ -64,6 +69,16 @@ export function parseCommand(text) {
       };
     case 'preview':
       return { type: 'preview', code: normalizeCode(args[0]) };
+    case 'show':
+      return { type: 'show', code: normalizeCode(args[0]) };
+    case 'save':
+      return { type: 'save', code: normalizeCode(args[0]) };
+    case 'saved':
+      return { type: 'saved' };
+    case 'more':
+      return { type: 'more' };
+    case 'stats':
+      return { type: 'stats' };
     case 'apply':
       return { type: 'apply', code: normalizeCode(args[0]), body };
     default:

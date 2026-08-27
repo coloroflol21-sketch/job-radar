@@ -49,6 +49,29 @@ export async function scanVacancies(state, statePath, config, { credentials, dry
     throw new Error('Ни один источник не ответил');
   }
 
+  // Источник, который ответил 200, но не дал ни одной вакансии там, где обычно
+  // даёт сотни, — сломался. Молча пустая выдача выглядела бы как «нет вакансий».
+  state.sourceHealth ??= {};
+  const broken = [];
+  results.forEach((result, i) => {
+    if (result.status !== 'fulfilled') return;
+    const { source } = tasks[i];
+    const health = state.sourceHealth[source] ?? { best: 0 };
+    const count = result.value.length;
+    if (count > health.best) health.best = count;
+    // Порог 20% от лучшего результата: обычные колебания выдачи в него укладываются.
+    if (count === 0 && health.best >= 10) broken.push(sourceLabel(source));
+    state.sourceHealth[source] = health;
+  });
+  if (broken.length > 0) {
+    const unique = [...new Set(broken)];
+    log(`  внимание: ${unique.join(', ')} ответили без ошибки, но не дали вакансий`);
+    failures.push({
+      label: unique.join(', '),
+      reason: 'ответил без ошибки, но не вернул ни одной вакансии — возможно, изменился формат',
+    });
+  }
+
   const limit = config.limits?.maxNotificationsPerRun ?? 12;
   const matching = selectNew(collected, new Set(state.sentIds), config.filters ?? {});
   const fresh = matching.slice(0, limit);
@@ -68,8 +91,11 @@ export async function scanVacancies(state, statePath, config, { credentials, dry
   }
 
   state.catalog ??= {};
-  pruneCatalog(state.catalog);
-  const coded = registerVacancies(state.catalog, fresh);
+  const keepCodes = [...(state.saved ?? []), ...(state.sentLog ?? []).map((record) => record.code)];
+  pruneCatalog(state.catalog, new Date(), { keepCodes });
+  // state передаётся как счётчик: nextCodeIndex только растёт, поэтому код
+  // никогда не достанется другой вакансии.
+  const coded = registerVacancies(state.catalog, fresh, new Date(), state);
 
   if (dryRun) {
     const withEmail = coded.filter((vacancy) => vacancy.email).length;

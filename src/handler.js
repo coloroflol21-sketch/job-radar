@@ -5,10 +5,7 @@ import { HELP_TEXT, validateApply } from './commands.js';
 import { sendApplication } from './mailer.js';
 import { buildScreen } from './menu.js';
 import { updateSetting } from './settings.js';
-
-function escapeHtml(text) {
-  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
+import { escapeHtml, renderVacancy, renderSaved, renderStats } from './views.js';
 
 function renderList(catalog) {
   const entries = Object.entries(catalog).sort(
@@ -42,6 +39,58 @@ function renderPreview(catalog, code) {
   return lines.join('\n');
 }
 
+/** Показывает письмо перед отправкой: адрес, тема и текст целиком. */
+function renderConfirmation(entry, body) {
+  return [
+    '📧 <b>Проверьте письмо перед отправкой</b>',
+    '',
+    `<b>Кому:</b> ${escapeHtml(entry.email)}`,
+    `<b>Компания:</b> ${escapeHtml(entry.company)}`,
+    `<b>Вакансия:</b> ${escapeHtml(entry.title)}`,
+    '',
+    '<b>Текст письма:</b>',
+    escapeHtml(body.length > 600 ? `${body.slice(0, 600)}…` : body),
+    '',
+    'Отправить письмо с вашего адреса?',
+  ].join('\n');
+}
+
+/**
+ * Выполняет отложенную отправку после подтверждения кнопкой.
+ * Возвращает текст ответа; state изменяется на месте.
+ */
+export async function confirmApply(code, state, { transport, from, replyTo, now = () => new Date() } = {}) {
+  const pending = state.pendingApply;
+  state.pendingApply = null;
+
+  if (!pending || pending.code !== code) {
+    return '⚠️ Нечего подтверждать — подготовьте отклик заново командой <code>/apply КОД</code>';
+  }
+
+  const entry = findByCode(state.catalog, code);
+  const check = validateApply({ code, body: pending.body }, entry, state.sentLog);
+  if (!check.ok) return `⚠️ ${check.reason}`;
+
+  if (!transport) return '⚠️ Отправка почты не настроена: нужны SMTP_USER и SMTP_PASSWORD';
+
+  try {
+    const result = await sendApplication(entry, pending.body, { transport, from, replyTo });
+    state.sentLog ??= [];
+    state.sentLog.push({
+      code,
+      id: entry.id,
+      title: entry.title,
+      company: entry.company,
+      email: entry.email,
+      sentAt: now().toISOString(),
+      messageId: result.messageId,
+    });
+    return `✅ Отклик отправлен: <b>${escapeHtml(entry.title)}</b>\n${escapeHtml(entry.company)} → ${escapeHtml(entry.email)}`;
+  } catch (error) {
+    return `❌ Отклик не отправлен: ${escapeHtml(error.message)}\nПопробуйте ещё раз командой <code>/apply ${code}</code>`;
+  }
+}
+
 function renderSent(sentLog) {
   if (sentLog.length === 0) return 'Откликов ещё не было.';
 
@@ -69,9 +118,12 @@ export async function handleCommands(commands, state, { transport, from, replyTo
         replies.push(HELP_TEXT);
         break;
 
-      case 'list':
-        replies.push(renderList(pruneCatalog(state.catalog, now())));
+      case 'list': {
+        // Избранное и вакансии с откликом чистка не трогает: к ним ещё вернутся.
+        const keepCodes = [...(state.saved ?? []), ...(state.sentLog ?? []).map((r) => r.code)];
+        replies.push(renderList(pruneCatalog(state.catalog, now(), { keepCodes })));
         break;
+      }
 
       case 'preview':
         replies.push(renderPreview(state.catalog, command.code));
@@ -79,6 +131,43 @@ export async function handleCommands(commands, state, { transport, from, replyTo
 
       case 'sent':
         replies.push(renderSent(state.sentLog));
+        break;
+
+      case 'show': {
+        const entry = findByCode(state.catalog, command.code);
+        replies.push(
+          entry
+            ? renderVacancy(entry, command.code, { now: now() })
+            : `Вакансия <code>${escapeHtml(command.code)}</code> не найдена. Список — <code>/list</code>`,
+        );
+        break;
+      }
+
+      case 'save': {
+        state.saved ??= [];
+        const entry = findByCode(state.catalog, command.code);
+        if (!entry) {
+          replies.push(`Вакансия <code>${escapeHtml(command.code)}</code> не найдена.`);
+        } else if (state.saved.includes(command.code)) {
+          replies.push(`Уже в избранном. Список — <code>/saved</code>`);
+        } else {
+          state.saved.push(command.code);
+          replies.push(`⭐ <b>${escapeHtml(entry.title)}</b> в избранном.\nСписок — <code>/saved</code>`);
+        }
+        break;
+      }
+
+      case 'saved':
+        replies.push(renderSaved(state.catalog, state.saved ?? [], { now: now() }));
+        break;
+
+      case 'stats':
+        replies.push(renderStats(state.catalog, { now: now() }));
+        break;
+
+      case 'more':
+        // Очередь наполняет поиск, отдаёт её отправитель: здесь только сигнал.
+        replies.push({ more: true });
         break;
 
       case 'settings': {
@@ -106,24 +195,20 @@ export async function handleCommands(commands, state, { transport, from, replyTo
           break;
         }
 
-        try {
-          const result = await sendApplication(entry, command.body, { transport, from, replyTo });
-          state.sentLog.push({
-            code: command.code,
-            id: entry.id,
-            title: entry.title,
-            company: entry.company,
-            email: entry.email,
-            sentAt: now().toISOString(),
-            messageId: result.messageId,
-          });
-          replies.push(
-            `✅ Отклик отправлен: <b>${escapeHtml(entry.title)}</b>\n` +
-              `${escapeHtml(entry.company)} → ${escapeHtml(entry.email)}`,
-          );
-        } catch (error) {
-          replies.push(`❌ Отклик не отправлен: ${escapeHtml(error.message)}\nПопробуйте ещё раз.`);
-        }
+        // Отправка письма необратима, поэтому сначала показываем, что уйдёт,
+        // и ждём подтверждения кнопкой.
+        state.pendingApply = {
+          code: command.code,
+          body: command.body,
+          preparedAt: now().toISOString(),
+        };
+        replies.push({
+          text: renderConfirmation(entry, command.body),
+          keyboard: [[
+            { text: '✅ Отправить', callback_data: `apply:yes:${command.code}` },
+            { text: '✖️ Отменить', callback_data: 'apply:no:0' },
+          ]],
+        });
         break;
       }
 

@@ -3,8 +3,15 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-/** Держим ограниченную историю, чтобы файл не рос бесконечно. */
-const MAX_REMEMBERED_IDS = 3000;
+/**
+ * История отправленного должна с запасом перекрывать окно поиска, иначе вакансия
+ * успеет вытесниться и придёт повторно. При трёх источниках это до 500 вакансий
+ * за прогон, поэтому 3000 не хватало — памяти было меньше суток при окне в трое.
+ */
+const MAX_REMEMBERED_IDS = 50_000;
+
+/** Журнал откликов тоже нельзя растить бесконечно. */
+const MAX_SENT_LOG = 500;
 
 const EMPTY_STATE = {
   sentIds: [],
@@ -13,6 +20,11 @@ const EMPTY_STATE = {
   catalog: {},
   sentLog: [],
   lastUpdateId: 0,
+  nextCodeIndex: 0,
+  saved: [],
+  queue: [],
+  pendingApply: null,
+  sourceHealth: {},
 };
 
 export async function loadState(path) {
@@ -25,6 +37,13 @@ export async function loadState(path) {
       catalog: parsed.catalog ?? {},
       sentLog: Array.isArray(parsed.sentLog) ? parsed.sentLog : [],
       lastUpdateId: parsed.lastUpdateId ?? 0,
+      // Счётчик кодов: только растёт, чтобы код не достался другой вакансии.
+      nextCodeIndex: parsed.nextCodeIndex ?? Object.keys(parsed.catalog ?? {}).length,
+      saved: Array.isArray(parsed.saved) ? parsed.saved : [],
+      queue: Array.isArray(parsed.queue) ? parsed.queue : [],
+      pendingApply: parsed.pendingApply ?? null,
+      sourceHealth: parsed.sourceHealth ?? {},
+      settings: parsed.settings,
     };
   } catch (error) {
     if (error.code === 'ENOENT') return structuredClone(EMPTY_STATE);
@@ -34,7 +53,11 @@ export async function loadState(path) {
 
 export async function saveState(path, state) {
   await mkdir(dirname(path), { recursive: true });
-  const payload = { ...state, sentIds: state.sentIds.slice(-MAX_REMEMBERED_IDS) };
+  const payload = {
+    ...state,
+    sentIds: state.sentIds.slice(-MAX_REMEMBERED_IDS),
+    sentLog: (state.sentLog ?? []).slice(-MAX_SENT_LOG),
+  };
   await writeFile(path, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 }
 

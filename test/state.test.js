@@ -13,14 +13,14 @@ async function tempFile(name = 'state.json') {
 
 test('отсутствующий файл состояния даёт пустое состояние', async () => {
   const state = await loadState(await tempFile('missing.json'));
-  assert.deepEqual(state, {
-    sentIds: [],
-    lastRunAt: null,
-    totalSent: 0,
-    catalog: {},
-    sentLog: [],
-    lastUpdateId: 0,
-  });
+  assert.deepEqual(state.sentIds, []);
+  assert.equal(state.lastRunAt, null);
+  assert.equal(state.totalSent, 0);
+  assert.deepEqual(state.catalog, {});
+  assert.deepEqual(state.sentLog, []);
+  assert.equal(state.lastUpdateId, 0);
+  assert.equal(state.nextCodeIndex, 0);
+  assert.deepEqual(state.saved, []);
 });
 
 test('состояние старого формата читается без потерь', async () => {
@@ -72,11 +72,12 @@ test('saveState создаёт вложенные каталоги', async () =>
 
 test('история id обрезается, чтобы файл не рос бесконечно', async () => {
   const path = await tempFile();
-  const ids = Array.from({ length: 5000 }, (_, i) => `id-${i}`);
-  await saveState(path, { sentIds: ids, lastRunAt: null, totalSent: 5000 });
+  const ids = Array.from({ length: 60000 }, (_, i) => 'id-' + i);
+  await saveState(path, { sentIds: ids, lastRunAt: null, totalSent: 60000 });
   const state = await loadState(path);
-  assert.equal(state.sentIds.length, 3000);
-  assert.equal(state.sentIds.at(-1), 'id-4999', 'должны остаться самые свежие id');
+  // Память должна перекрывать окно поиска: при трёх источниках это десятки тысяч.
+  assert.equal(state.sentIds.length, 50000);
+  assert.equal(state.sentIds.at(-1), 'id-59999', 'остаются самые свежие id');
 });
 
 test('первый запуск берёт окно из fallbackDays', () => {

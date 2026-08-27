@@ -11,7 +11,7 @@ import {
   answerCallback,
 } from './telegram.js';
 import { parseCommand } from './commands.js';
-import { handleCommands } from './handler.js';
+import { handleCommands, confirmApply } from './handler.js';
 import { applyCallback } from './menu.js';
 import { saveState } from './state.js';
 
@@ -28,7 +28,7 @@ async function reply(item, credentials) {
  * createTransport вызывается только если есть команда /apply: без откликов
  * настройки почты не нужны, и их отсутствие не должно мешать остальному.
  */
-export async function processInbox(state, statePath, credentials, { createTransport, mail = {}, config = {}, fetchImpl = fetch, now = () => new Date(), timeout = 0, signal, onPreview } = {}) {
+export async function processInbox(state, statePath, credentials, { createTransport = () => null, mail = {}, config = {}, fetchImpl = fetch, now = () => new Date(), timeout = 0, signal, onPreview, onMore } = {}) {
   const updates = await getUpdates({
     token: credentials.token,
     offset: (state.lastUpdateId ?? 0) + 1,
@@ -51,8 +51,43 @@ export async function processInbox(state, statePath, credentials, { createTransp
 
   const replies = [];
 
-  // Нажатия кнопок: применяем настройку и перерисовываем меню на месте.
+  // Нажатия кнопок: подтверждение отклика либо настройка с перерисовкой меню.
   for (const callback of callbacks) {
+    const [action, decision, code] = callback.data.split(':');
+
+    if (action === 'apply') {
+      await answerCallback(callback.id, { token: credentials.token, text: '', fetchImpl });
+
+      if (decision === 'no') {
+        state.pendingApply = null;
+        await editMessage('✖️ Отклик отменён, письмо не отправлено.', {
+          ...credentials,
+          messageId: callback.messageId,
+          fetchImpl,
+        });
+        replies.push('отклик отменён');
+      } else {
+        // Транспорт создаём только здесь: до подтверждения почта не нужна.
+        let transport = null;
+        try {
+          transport = createTransport();
+        } catch {
+          transport = null;
+        }
+        const answer = await confirmApply(code, state, {
+          transport,
+          from: mail.from,
+          replyTo: mail.replyTo,
+          now,
+        });
+        await editMessage(answer, { ...credentials, messageId: callback.messageId, fetchImpl });
+        replies.push(answer);
+      }
+
+      await saveState(statePath, state);
+      continue;
+    }
+
     const result = applyCallback(callback.data, config, state);
     await answerCallback(callback.id, { token: credentials.token, text: result.notice, fetchImpl });
 
@@ -75,10 +110,11 @@ export async function processInbox(state, statePath, credentials, { createTransp
   if (callbacks.length > 0) await saveState(statePath, state);
   if (commands.length === 0) return replies;
 
-  let transport = null;
+  // Проверяем настройки почты заранее: лучше сказать сразу, чем показать
+  // письмо, дать нажать «Отправить» и только потом сообщить о проблеме.
   if (commands.some((command) => command.type === 'apply')) {
     try {
-      transport = createTransport();
+      createTransport();
     } catch (error) {
       const warning = `⚠️ Отправка почты не настроена: ${error.message}`;
       await sendMessage(warning, { ...credentials, fetchImpl });
@@ -87,7 +123,6 @@ export async function processInbox(state, statePath, credentials, { createTransp
   }
 
   const answers = await handleCommands(commands, state, {
-    transport,
     from: mail.from,
     replyTo: mail.replyTo,
     now,
@@ -96,6 +131,11 @@ export async function processInbox(state, statePath, credentials, { createTransp
 
   await saveState(statePath, state);
   for (const answer of answers) {
+    // /more обслуживает вызывающий: у него есть доступ к очереди и поиску.
+    if (answer?.more) {
+      if (onMore) await onMore();
+      continue;
+    }
     await reply(answer, { ...credentials, fetchImpl });
   }
 
