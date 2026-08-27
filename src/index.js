@@ -16,7 +16,7 @@ import { loadEnv } from './env.js';
 import { loadState } from './state.js';
 import { processInbox } from './inbox.js';
 import { scanVacancies } from './scan.js';
-import { serve, announceOnline, announceOffline, emptyResultText, failureText } from './serve.js';
+import { serve, announceOnline, announceOffline, emptyResultText, failureText, registerCommands } from './serve.js';
 import { sendMessage } from './telegram.js';
 import { createMailer } from './mailer.js';
 import { effectiveConfig } from './settings.js';
@@ -81,7 +81,8 @@ async function main() {
     }
 
     const stopSignal = stopOnInterrupt(console.log);
-    await announceOnline(credentials, { scanIntervalMinutes: args.scanInterval });
+    await registerCommands(credentials);
+    await announceOnline(credentials, { scanIntervalMinutes: args.scanInterval, state });
 
     try {
       await serve(state, args.state, config, {

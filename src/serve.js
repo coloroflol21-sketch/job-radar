@@ -5,9 +5,11 @@
 
 import { processInbox } from './inbox.js';
 import { scanVacancies } from './scan.js';
-import { sendMessage } from './telegram.js';
+import { sendMessage, setCommands } from './telegram.js';
 import { createMailer } from './mailer.js';
 import { effectiveConfig } from './settings.js';
+import { homeScreen } from './menu.js';
+import { BOT_COMMANDS } from './commands.js';
 
 /** Telegram держит соединение до 50 секунд; больше не имеет смысла. */
 const POLL_TIMEOUT_SECONDS = 30;
@@ -172,20 +174,25 @@ export async function serve(state, statePath, config, { credentials, stopSignal,
  * Сообщает в чат, что бот на связи: иначе неясно,
  * дошла ли команда или программа не запущена.
  */
-export async function announceOnline(credentials, { scanIntervalMinutes } = {}) {
+/**
+ * Регистрирует команды в интерфейсе Telegram. Ошибку глушим: без списка команд
+ * бот работает, а падать из-за косметики при старте незачем.
+ */
+export async function registerCommands(credentials) {
+  await setCommands(BOT_COMMANDS, credentials).catch(() => {});
+}
+
+export async function announceOnline(credentials, { scanIntervalMinutes, state = {} } = {}) {
+  const home = homeScreen(state);
   const text = [
     '🟢 <b>Бот на связи</b>',
+    `Отвечаю сразу. Новые вакансии проверяю каждые ${scanIntervalMinutes} мин.`,
     '',
-    'Отвечаю сразу, пока запущен.',
-    '',
-    '<code>/settings</code> — настроить поиск кнопками',
-    '<code>/list</code> — вакансии для отклика',
-    '<code>/help</code> — все команды',
-    '',
-    `Новые вакансии проверяю каждые ${scanIntervalMinutes} мин.`,
+    home.text,
   ].join('\n');
 
-  await sendMessage(text, credentials);
+  // Сразу с кнопками: команды набирать не нужно.
+  await sendMessage(text, { ...credentials, keyboard: home.keyboard });
 }
 
 export async function announceOffline(credentials) {

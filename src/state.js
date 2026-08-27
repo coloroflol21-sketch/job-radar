@@ -24,6 +24,9 @@ const EMPTY_STATE = {
   saved: [],
   queue: [],
   pendingApply: null,
+  // На какую вакансию ждём текст письма: между нажатием кнопки и ответом
+  // может пройти запуск по расписанию, поэтому поле обязано сохраняться.
+  awaitingLetter: null,
   sourceHealth: {},
 };
 
@@ -42,6 +45,7 @@ export async function loadState(path) {
       saved: Array.isArray(parsed.saved) ? parsed.saved : [],
       queue: Array.isArray(parsed.queue) ? parsed.queue : [],
       pendingApply: parsed.pendingApply ?? null,
+      awaitingLetter: parsed.awaitingLetter ?? null,
       sourceHealth: parsed.sourceHealth ?? {},
       settings: parsed.settings,
     };

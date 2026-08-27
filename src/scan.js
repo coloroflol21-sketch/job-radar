@@ -3,7 +3,7 @@
 import { SOURCES, planQueries, sourceLabel } from './sources/index.js';
 import { selectNew } from './filter.js';
 import { windowStart, saveState } from './state.js';
-import { sendDigest, formatVacancy } from './telegram.js';
+import { sendVacancyCards, formatVacancy } from './telegram.js';
 import { registerVacancies, pruneCatalog } from './catalog.js';
 
 /**
@@ -104,7 +104,9 @@ export async function scanVacancies(state, statePath, config, { credentials, dry
     return { sent: coded, collected: collected.length, matching: matching.length, deferred, failures };
   }
 
-  await sendDigest(coded, credentials);
+  // Карточками, а не одним дайджестом: кнопки привязаны к сообщению,
+  // поэтому у каждой вакансии должно быть своё.
+  await sendVacancyCards(coded, credentials);
 
   state.sentIds = [...state.sentIds, ...coded.map((vacancy) => vacancy.id)];
   // Окно сдвигаем только когда отправили всё найденное. Иначе отложенные лимитом

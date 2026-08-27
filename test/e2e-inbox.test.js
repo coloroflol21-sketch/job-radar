@@ -321,3 +321,101 @@ test('/list работает без настроек почты', async () => {
     await telegram.close();
   }
 });
+
+test('отклик целиком кликами: кнопка, текст письма, подтверждение', async () => {
+  const statePath = await tempStatePath();
+  const mailed = [];
+  const transport = { sendMail: async (m) => { mailed.push(m); return { messageId: '<x>', accepted: [m.to] }; } };
+
+  // 1. Нажали «Откликнуться» под вакансией — бот просит текст письма.
+  const step1 = await fakeTelegram([
+    { update_id: 30, callback_query: { id: 'cb-30', data: 'act:apply:A1', message: { message_id: 4, chat: { id: 555 } } } },
+  ]);
+  try {
+    await run(stateWithCatalog(), statePath, step1, transport);
+    assert.equal(step1.sentMessages.length, 1);
+    assert.match(step1.sentMessages[0].text, /Напишите текст письма/);
+    assert.equal(step1.sentMessages[0].reply_markup?.force_reply, true, 'поле ввода должно открыться само');
+    assert.equal(mailed.length, 0);
+
+    const afterAsk = await loadState(statePath);
+    assert.equal(afterAsk.awaitingLetter.code, 'A1', 'бот помнит, на что ждёт ответ');
+  } finally {
+    await step1.close();
+  }
+
+  // 2. Написали текст без всякой команды — он становится письмом.
+  const step2 = await fakeTelegram([
+    message(31, 'Здравствуйте! Заинтересовала ваша вакансия, готов обсудить детали.'),
+  ]);
+  try {
+    await run(await loadState(statePath), statePath, step2, transport);
+    assert.match(step2.sentMessages[0].text, /Проверьте письмо перед отправкой/);
+    assert.equal(mailed.length, 0, 'до подтверждения письмо не уходит');
+
+    const ready = await loadState(statePath);
+    assert.equal(ready.pendingApply.code, 'A1');
+    assert.equal(ready.awaitingLetter, null, 'ожидание текста снято');
+  } finally {
+    await step2.close();
+  }
+
+  // 3. Нажали «Отправить».
+  const step3 = await fakeTelegram([
+    { update_id: 32, callback_query: { id: 'cb-32', data: 'apply:yes:A1', message: { message_id: 6, chat: { id: 555 } } } },
+  ]);
+  try {
+    await run(await loadState(statePath), statePath, step3, transport);
+    assert.equal(mailed.length, 1, 'письмо ушло без единой набранной команды');
+    assert.equal(mailed[0].to, 'hr@example.com');
+
+    const done = await loadState(statePath);
+    assert.equal(done.sentLog.length, 1);
+  } finally {
+    await step3.close();
+  }
+});
+
+test('кнопки разделов открывают их без набора команд', async () => {
+  const statePath = await tempStatePath();
+  const telegram = await fakeTelegram([
+    { update_id: 40, callback_query: { id: 'cb-40', data: 'go:list', message: { message_id: 4, chat: { id: 555 } } } },
+  ]);
+
+  try {
+    await run(stateWithCatalog(), statePath, telegram, null);
+    assert.equal(telegram.sentMessages.length, 1);
+    assert.match(telegram.sentMessages[0].text, /A1/, 'открылся список вакансий');
+  } finally {
+    await telegram.close();
+  }
+});
+
+test('кнопка «В избранное» работает из-под вакансии', async () => {
+  const statePath = await tempStatePath();
+  const telegram = await fakeTelegram([
+    { update_id: 41, callback_query: { id: 'cb-41', data: 'act:save:A1', message: { message_id: 4, chat: { id: 555 } } } },
+  ]);
+
+  try {
+    await run(stateWithCatalog(), statePath, telegram, null);
+    assert.match(telegram.sentMessages[0].text, /в избранном/);
+    const saved = await loadState(statePath);
+    assert.deepEqual(saved.saved, ['A1']);
+  } finally {
+    await telegram.close();
+  }
+});
+
+test('обычный текст без ожидания письма не считается откликом', async () => {
+  const statePath = await tempStatePath();
+  const telegram = await fakeTelegram([message(42, 'просто привет')]);
+
+  try {
+    const replies = await run(stateWithCatalog(), statePath, telegram, null);
+    assert.deepEqual(replies, [], 'болтовня игнорируется');
+    assert.equal(telegram.sentMessages.length, 0);
+  } finally {
+    await telegram.close();
+  }
+});

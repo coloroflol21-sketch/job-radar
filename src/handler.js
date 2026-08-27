@@ -3,7 +3,7 @@
 import { findByCode, pruneCatalog } from './catalog.js';
 import { HELP_TEXT, validateApply } from './commands.js';
 import { sendApplication } from './mailer.js';
-import { buildScreen } from './menu.js';
+import { buildScreen, homeScreen } from './menu.js';
 import { updateSetting } from './settings.js';
 import { escapeHtml, renderVacancy, renderSaved, renderStats } from './views.js';
 
@@ -173,6 +173,12 @@ export async function handleCommands(commands, state, { transport, from, replyTo
       case 'settings': {
         // Ответ с клавиатурой: отправитель разберётся, как его показать.
         const screen = buildScreen('main', config, state);
+        replies.push({ text: screen.text, keyboard: screen.keyboard });
+        break;
+      }
+
+      case 'menu': {
+        const screen = homeScreen(state);
         replies.push({ text: screen.text, keyboard: screen.keyboard });
         break;
       }

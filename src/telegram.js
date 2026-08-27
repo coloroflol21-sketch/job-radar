@@ -17,7 +17,11 @@ function formatSalary(vacancy) {
   return min ? `от ${money(min)}` : `до ${money(max)}`;
 }
 
-export function formatVacancy(vacancy, index) {
+/**
+ * withHints=false — когда под сообщением есть кнопки: текстовые подсказки
+ * вида «/apply A1» тогда лишние.
+ */
+export function formatVacancy(vacancy, index, { withHints = true } = {}) {
   const label = vacancy.code ? `<code>${escapeHtml(vacancy.code)}</code> ` : `${index}. `;
   const lines = [
     `${label}<b>${escapeHtml(vacancy.title)}</b>`,
@@ -28,8 +32,10 @@ export function formatVacancy(vacancy, index) {
   if (vacancy.experienceYears) lines.push(`🎓 опыт от ${vacancy.experienceYears} лет`);
   if (vacancy.schedule) lines.push(`🕒 ${escapeHtml(vacancy.schedule)}`);
   if (vacancy.employment) lines.push(`🏠 ${escapeHtml(vacancy.employment)}`);
-  if (vacancy.url) lines.push(`<a href="${escapeHtml(vacancy.url)}">Открыть вакансию</a>`);
 
+  if (!withHints) return lines.join('\n');
+
+  if (vacancy.url) lines.push(`<a href="${escapeHtml(vacancy.url)}">Открыть вакансию</a>`);
   if (vacancy.code && vacancy.email) {
     lines.push(`✍️ отклик: <code>/apply ${escapeHtml(vacancy.code)}</code>`);
   } else if (vacancy.url) {
@@ -60,6 +66,35 @@ export function buildDigest(vacancies) {
   messages.push(current);
 
   return messages;
+}
+
+/**
+ * Кнопки действий под вакансией: отклик, описание, избранное.
+ * Так не нужно набирать «/apply A1» руками.
+ */
+export function vacancyKeyboard(vacancy) {
+  const row = [];
+  if (vacancy.email) row.push({ text: '✍️ Откликнуться', callback_data: `act:apply:${vacancy.code}` });
+  row.push({ text: '📄 Подробнее', callback_data: `act:show:${vacancy.code}` });
+
+  const second = [{ text: '⭐ В избранное', callback_data: `act:save:${vacancy.code}` }];
+  if (vacancy.url) second.push({ text: '🔗 На сайте', url: vacancy.url });
+
+  return [row, second];
+}
+
+/**
+ * Каждая вакансия — отдельное сообщение со своими кнопками.
+ * Слить их в один дайджест нельзя: кнопки привязаны к сообщению, а не к строке.
+ */
+export async function sendVacancyCards(vacancies, credentials) {
+  await sendMessage(`🎯 <b>Новые вакансии: ${vacancies.length}</b>`, credentials);
+  for (const vacancy of vacancies) {
+    await sendMessage(formatVacancy(vacancy, 0, { withHints: false }), {
+      ...credentials,
+      keyboard: vacancyKeyboard(vacancy),
+    });
+  }
 }
 
 export async function sendMessage(text, { token, chatId, keyboard, fetchImpl = fetch } = {}) {
@@ -110,6 +145,39 @@ export async function editMessage(text, { token, chatId, messageId, keyboard, fe
   if (!payload.ok && !/message is not modified/i.test(payload.description ?? '')) {
     throw new Error(`Telegram: ${payload.description ?? response.status}`);
   }
+  return payload;
+}
+
+/**
+ * Регистрирует команды в интерфейсе Telegram: они появляются в меню рядом
+ * с полем ввода и в подсказке при наборе «/». Иначе про команды надо знать заранее.
+ */
+export async function setCommands(commands, { token, fetchImpl = fetch } = {}) {
+  const response = await fetchImpl(`https://api.telegram.org/bot${token}/setMyCommands`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ commands }),
+  });
+  return response.json();
+}
+
+/**
+ * Просит написать текст: Telegram сам открывает поле ответа, как будто нажали
+ * «Ответить». Так письмо и ключевые слова вводятся без набора команды.
+ */
+export async function askForReply(text, { token, chatId, fetchImpl = fetch } = {}) {
+  const response = await fetchImpl(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text,
+      parse_mode: 'HTML',
+      reply_markup: { force_reply: true, input_field_placeholder: 'Напишите текст здесь' },
+    }),
+  });
+  const payload = await response.json();
+  if (!payload.ok) throw new Error(`Telegram: ${payload.description ?? response.status}`);
   return payload;
 }
 

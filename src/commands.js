@@ -6,6 +6,19 @@
 
 import { normalizeCode } from './catalog.js';
 
+/** Команды для меню Telegram: показываются рядом с полем ввода. */
+export const BOT_COMMANDS = [
+  { command: 'menu', description: 'Главное меню' },
+  { command: 'list', description: 'Вакансии для отклика' },
+  { command: 'settings', description: 'Настройки поиска' },
+  { command: 'saved', description: 'Избранное' },
+  { command: 'stats', description: 'Сводка по рынку' },
+  { command: 'more', description: 'Прислать ещё вакансий' },
+  { command: 'sent', description: 'Отправленные отклики' },
+  { command: 'keywords', description: 'Ключевые слова в названии' },
+  { command: 'help', description: 'Справка' },
+];
+
 export const HELP_TEXT = [
   '<b>Job Radar — команды</b>',
   '',
@@ -57,6 +70,8 @@ export function parseCommand(text) {
       return { type: 'sent' };
     case 'settings':
       return { type: 'settings' };
+    case 'menu':
+      return { type: 'menu' };
     case 'keywords':
       // Слова перечисляются через запятую в той же строке.
       return {

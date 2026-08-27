@@ -9,16 +9,62 @@ import {
   sendMessage,
   editMessage,
   answerCallback,
+  askForReply,
 } from './telegram.js';
 import { parseCommand } from './commands.js';
 import { handleCommands, confirmApply } from './handler.js';
-import { applyCallback } from './menu.js';
+import { applyCallback, homeScreen } from './menu.js';
+import { findByCode } from './catalog.js';
 import { saveState } from './state.js';
 
 /** Отправляет ответ: строка — обычный текст, объект — текст с клавиатурой. */
 async function reply(item, credentials) {
   if (typeof item === 'string') return sendMessage(item, credentials);
   return sendMessage(item.text, { ...credentials, keyboard: item.keyboard });
+}
+
+/** Раздел главного меню — то же, что соответствующая команда. */
+async function runSection(section, state, { config, onMore, now }) {
+  if (section === 'more') {
+    if (onMore) await onMore();
+    return null;
+  }
+  if (section === 'home') return homeScreen(state);
+
+  const map = { list: '/list', saved: '/saved', stats: '/stats', sent: '/sent', help: '/help' };
+  const command = parseCommand(map[section] ?? '/help');
+  const [answer] = await handleCommands([command], state, { config, now });
+  return answer;
+}
+
+/**
+ * Действие по вакансии из кнопки под сообщением.
+ * Для отклика открывается поле ввода: текст письма пишет пользователь.
+ */
+async function runVacancyAction(action, code, state, { credentials, fetchImpl, now }) {
+  if (action === 'apply') {
+    const entry = findByCode(state.catalog ?? {}, code);
+    if (!entry) return `Вакансия ${code} не найдена.`;
+    if (!entry.email) return `У вакансии ${code} нет адреса — откликнуться можно только на сайте.`;
+
+    // Запоминаем, на что отвечаем: следующее сообщение станет текстом письма.
+    state.awaitingLetter = { code, askedAt: new Date().toISOString() };
+    await askForReply(
+      [
+        `✍️ <b>Отклик на «${entry.title}»</b>`,
+        `Компания: ${entry.company}`,
+        '',
+        'Напишите текст письма ответом на это сообщение.',
+        'Перед отправкой я покажу письмо и спрошу подтверждение.',
+      ].join('\n'),
+      { ...credentials, fetchImpl },
+    );
+    return null;
+  }
+
+  const command = parseCommand(`/${action} ${code}`);
+  const [answer] = await handleCommands([command], state, { now });
+  return answer;
 }
 
 /**
@@ -40,7 +86,20 @@ export async function processInbox(state, statePath, credentials, { createTransp
 
   const messages = extractCommands(updates, credentials.chatId);
   const callbacks = extractCallbacks(updates, credentials.chatId);
-  const commands = messages.map((message) => parseCommand(message.text)).filter(Boolean);
+
+  // Если бот ждёт текст письма, первое сообщение без слеша — это письмо,
+  // а не команда: пользователь нажал «Откликнуться» и пишет ответ.
+  const commands = [];
+  for (const message of messages) {
+    const waiting = state.awaitingLetter;
+    if (waiting && !message.text.trim().startsWith('/')) {
+      state.awaitingLetter = null;
+      commands.push({ type: 'apply', code: waiting.code, body: message.text.trim() });
+      continue;
+    }
+    const command = parseCommand(message.text);
+    if (command) commands.push(command);
+  }
 
   // Подтверждаем до выполнения: иначе упавшая на середине команда
   // повторится при следующем запуске и отклик уйдёт дважды.
@@ -54,6 +113,30 @@ export async function processInbox(state, statePath, credentials, { createTransp
   // Нажатия кнопок: подтверждение отклика либо настройка с перерисовкой меню.
   for (const callback of callbacks) {
     const [action, decision, code] = callback.data.split(':');
+
+    // Переходы по разделам: новое сообщение, чтобы не терять список вакансий.
+    if (action === 'go') {
+      await answerCallback(callback.id, { token: credentials.token, text: '', fetchImpl });
+      const answer = await runSection(decision, state, { config, onMore, now });
+      if (answer) {
+        await reply(answer, { ...credentials, fetchImpl });
+        replies.push(typeof answer === 'string' ? answer : answer.text);
+      }
+      await saveState(statePath, state);
+      continue;
+    }
+
+    // Кнопки под вакансией: отклик, описание, избранное.
+    if (action === 'act' && ['apply', 'show', 'save'].includes(decision)) {
+      await answerCallback(callback.id, { token: credentials.token, text: '', fetchImpl });
+      const answer = await runVacancyAction(decision, code, state, { credentials, fetchImpl, now });
+      if (answer) {
+        await reply(answer, { ...credentials, fetchImpl });
+        replies.push(typeof answer === 'string' ? answer : answer.text);
+      }
+      await saveState(statePath, state);
+      continue;
+    }
 
     if (action === 'apply') {
       await answerCallback(callback.id, { token: credentials.token, text: '', fetchImpl });

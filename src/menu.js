@@ -61,6 +61,31 @@ function multiChoiceScreen(screen, title, options, active, hint) {
   };
 }
 
+/** Главное меню бота: всё доступно кликами, без набора команд. */
+export function homeScreen(state = {}) {
+  const savedCount = (state.saved ?? []).length;
+  const sentCount = (state.sentLog ?? []).length;
+  const catalogCount = Object.keys(state.catalog ?? {}).length;
+
+  return {
+    text: [
+      '🧭 <b>Job Radar</b>',
+      '',
+      `Вакансий в каталоге: ${catalogCount}`,
+      `В избранном: ${savedCount} · Откликов отправлено: ${sentCount}`,
+      '',
+      'Выберите, что нужно.',
+    ].join('\n'),
+    keyboard: [
+      [button('📋 Вакансии', 'go:list'), button('⭐ Избранное', 'go:saved')],
+      [button('⚙️ Настройки поиска', 'open:main')],
+      [button('📊 Сводка по рынку', 'go:stats'), button('📮 Мои отклики', 'go:sent')],
+      [button('🔄 Проверить сейчас', 'act:preview'), button('➕ Ещё вакансии', 'go:more')],
+      [button('❓ Справка', 'go:help')],
+    ],
+  };
+}
+
 function mainScreen(config, state) {
   const summary = describeSettings(config, state);
   const text = [
@@ -85,6 +110,7 @@ function mainScreen(config, state) {
       [button('🕒 График', 'open:schedules'), button('📅 Свежесть', 'open:age')],
       [button('🔍 Ключевые слова', 'open:keywords')],
       [button('🔎 Проверить выдачу', 'act:preview')],
+      [button('‹ В главное меню', 'go:home')],
     ],
   };
 }
