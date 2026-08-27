@@ -3,6 +3,8 @@
 import { findByCode, pruneCatalog } from './catalog.js';
 import { HELP_TEXT, validateApply } from './commands.js';
 import { sendApplication } from './mailer.js';
+import { buildScreen } from './menu.js';
+import { updateSetting } from './settings.js';
 
 function escapeHtml(text) {
   return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -56,7 +58,7 @@ function renderSent(sentLog) {
  * state изменяется на месте: журнал откликов должен сохраниться
  * даже если следующая команда упадёт.
  */
-export async function handleCommands(commands, state, { transport, from, replyTo, now = () => new Date() } = {}) {
+export async function handleCommands(commands, state, { transport, from, replyTo, now = () => new Date(), config = {} } = {}) {
   const replies = [];
   state.catalog ??= {};
   state.sentLog ??= [];
@@ -78,6 +80,23 @@ export async function handleCommands(commands, state, { transport, from, replyTo
       case 'sent':
         replies.push(renderSent(state.sentLog));
         break;
+
+      case 'settings': {
+        // Ответ с клавиатурой: отправитель разберётся, как его показать.
+        const screen = buildScreen('main', config, state);
+        replies.push({ text: screen.text, keyboard: screen.keyboard });
+        break;
+      }
+
+      case 'keywords': {
+        updateSetting(state, 'titleKeywords', command.words);
+        replies.push(
+          command.words.length > 0
+            ? `🔍 Ключевые слова обновлены: <code>${escapeHtml(command.words.join(', '))}</code>\n\nТеперь в дайджест попадают вакансии, у которых одно из этих слов есть в названии.`
+            : '🔍 Фильтр по ключевым словам убран — приходят все вакансии по вашим запросам.',
+        );
+        break;
+      }
 
       case 'apply': {
         const entry = findByCode(state.catalog, command.code);

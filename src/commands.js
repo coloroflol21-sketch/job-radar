@@ -9,9 +9,11 @@ import { normalizeCode } from './catalog.js';
 export const HELP_TEXT = [
   '<b>Job Radar — команды</b>',
   '',
+  '<code>/settings</code> — настройки поиска кнопками',
   '<code>/list</code> — вакансии, доступные для отклика',
   '<code>/preview A1</code> — контакты и адрес отклика',
   '<code>/apply A1</code> + текст письма с новой строки — отправить отклик',
+  '<code>/keywords поддержк, helpdesk</code> — ключевые слова в названии',
   '<code>/sent</code> — история отправленных откликов',
   '<code>/help</code> — эта справка',
   '',
@@ -19,7 +21,8 @@ export const HELP_TEXT = [
   '<code>/apply A1</code>',
   '<code>Здравствуйте! Заинтересовала вакансия...</code>',
   '',
-  'Ответ приходит при следующем запуске по расписанию, обычно в пределах часа.',
+  'В режиме живого бота ответ приходит сразу, при запуске по расписанию —',
+  'при следующем прогоне.',
 ].join('\n');
 
 /**
@@ -47,6 +50,18 @@ export function parseCommand(text) {
       return { type: 'list' };
     case 'sent':
       return { type: 'sent' };
+    case 'settings':
+      return { type: 'settings' };
+    case 'keywords':
+      // Слова перечисляются через запятую в той же строке.
+      return {
+        type: 'keywords',
+        words: args
+          .join(' ')
+          .split(',')
+          .map((word) => word.trim().toLowerCase())
+          .filter(Boolean),
+      };
     case 'preview':
       return { type: 'preview', code: normalizeCode(args[0]) };
     case 'apply':

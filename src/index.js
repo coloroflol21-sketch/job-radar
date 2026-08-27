@@ -18,6 +18,7 @@ import { processInbox } from './inbox.js';
 import { scanVacancies } from './scan.js';
 import { serve, announceOnline, announceOffline } from './serve.js';
 import { createMailer } from './mailer.js';
+import { effectiveConfig } from './settings.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -103,6 +104,7 @@ async function main() {
           from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
           replyTo: process.env.SMTP_USER,
         },
+        config,
       });
       if (replies.length > 0) console.log(`Обработано команд из чата: ${replies.length}`);
     } catch (error) {
@@ -111,7 +113,8 @@ async function main() {
     }
   }
 
-  const sent = await scanVacancies(state, args.state, config, {
+  // Настройки из чата перекрывают config.json — читаем их после обработки команд.
+  const sent = await scanVacancies(state, args.state, effectiveConfig(config, state), {
     credentials,
     dryRun: args.dryRun,
   });

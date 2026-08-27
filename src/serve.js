@@ -7,6 +7,7 @@ import { processInbox } from './inbox.js';
 import { scanVacancies } from './scan.js';
 import { sendMessage } from './telegram.js';
 import { createMailer } from './mailer.js';
+import { effectiveConfig } from './settings.js';
 
 /** Telegram держит соединение до 50 секунд; больше не имеет смысла. */
 const POLL_TIMEOUT_SECONDS = 30;
@@ -29,21 +30,28 @@ export async function serve(state, statePath, config, { credentials, stopSignal,
   const scanIntervalMs = scanIntervalMinutes * 60_000;
   let lastScanAt = 0;
 
-  log(`Бот запущен. Команды: /help, /list, /preview, /apply, /sent`);
+  log('Бот запущен. Команды: /settings, /help, /list, /preview, /apply, /sent');
   log(`Поиск вакансий — каждые ${scanIntervalMinutes} мин. Остановить — Ctrl+C.\n`);
+
+  /** Настройки из чата перекрывают config.json, поэтому читаем их каждый раз. */
+  const runScan = async () => {
+    const active = effectiveConfig(config, state);
+    const sent = await scan(state, statePath, active, { credentials, log });
+    if (sent.length > 0) {
+      const withEmail = sent.filter((vacancy) => vacancy.email).length;
+      log(`Отправлено вакансий: ${sent.length}, с адресом для отклика: ${withEmail}\n`);
+    } else {
+      log('Новых подходящих вакансий нет.\n');
+    }
+    return sent;
+  };
 
   while (!stopSignal.aborted) {
     // Поиск по таймеру: первый прогон сразу при старте.
     if (Date.now() - lastScanAt >= scanIntervalMs) {
       lastScanAt = Date.now();
       try {
-        const sent = await scan(state, statePath, config, { credentials, log });
-        if (sent.length > 0) {
-          const withEmail = sent.filter((vacancy) => vacancy.email).length;
-          log(`Отправлено вакансий: ${sent.length}, с адресом для отклика: ${withEmail}\n`);
-        } else {
-          log('Новых подходящих вакансий нет.\n');
-        }
+        await runScan();
       } catch (error) {
         log(`Поиск не удался: ${error.message}`);
       }
@@ -55,9 +63,15 @@ export async function serve(state, statePath, config, { credentials, stopSignal,
       const replies = await processInbox(state, statePath, credentials, {
         createTransport: createMailer,
         mail: mailSettings(),
+        config,
         timeout: POLL_TIMEOUT_SECONDS,
         signal: stopSignal,
         fetchImpl,
+        // Кнопка «Проверить выдачу» в меню запускает поиск не дожидаясь таймера.
+        onPreview: async () => {
+          lastScanAt = Date.now();
+          await runScan().catch((error) => log(`Поиск не удался: ${error.message}`));
+        },
       });
       if (replies.length > 0) log(`Ответов на команды: ${replies.length}`);
     } catch (error) {
@@ -79,8 +93,11 @@ export async function announceOnline(credentials, { scanIntervalMinutes } = {}) 
   const text = [
     '🟢 <b>Бот на связи</b>',
     '',
-    'Отвечаю сразу, пока запущен. Команды: <code>/help</code>, <code>/list</code>,',
-    '<code>/preview A1</code>, <code>/apply A1</code>, <code>/sent</code>.',
+    'Отвечаю сразу, пока запущен.',
+    '',
+    '<code>/settings</code> — настроить поиск кнопками',
+    '<code>/list</code> — вакансии для отклика',
+    '<code>/help</code> — все команды',
     '',
     `Новые вакансии проверяю каждые ${scanIntervalMinutes} мин.`,
   ].join('\n');

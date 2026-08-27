@@ -62,23 +62,68 @@ export function buildDigest(vacancies) {
   return messages;
 }
 
-export async function sendMessage(text, { token, chatId, fetchImpl = fetch } = {}) {
+export async function sendMessage(text, { token, chatId, keyboard, fetchImpl = fetch } = {}) {
   if (!token || !chatId) throw new Error('Не заданы TELEGRAM_BOT_TOKEN или TELEGRAM_CHAT_ID');
+
+  const body = {
+    chat_id: chatId,
+    text,
+    parse_mode: 'HTML',
+    disable_web_page_preview: true,
+  };
+  if (keyboard) body.reply_markup = { inline_keyboard: keyboard };
 
   const response = await fetchImpl(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      parse_mode: 'HTML',
-      disable_web_page_preview: true,
-    }),
+    body: JSON.stringify(body),
   });
 
   const payload = await response.json();
   if (!payload.ok) throw new Error(`Telegram: ${payload.description ?? response.status}`);
   return payload;
+}
+
+/**
+ * Перерисовывает уже отправленное сообщение — так меню меняется на месте,
+ * без новых сообщений в чате на каждое нажатие.
+ */
+export async function editMessage(text, { token, chatId, messageId, keyboard, fetchImpl = fetch } = {}) {
+  const body = {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    parse_mode: 'HTML',
+    disable_web_page_preview: true,
+  };
+  if (keyboard) body.reply_markup = { inline_keyboard: keyboard };
+
+  const response = await fetchImpl(`https://api.telegram.org/bot${token}/editMessageText`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  const payload = await response.json();
+  // Нажатие на уже выбранный вариант не меняет текст — Telegram отвечает
+  // ошибкой «message is not modified», и это не сбой.
+  if (!payload.ok && !/message is not modified/i.test(payload.description ?? '')) {
+    throw new Error(`Telegram: ${payload.description ?? response.status}`);
+  }
+  return payload;
+}
+
+/**
+ * Гасит «часики» на кнопке. Telegram требует ответить на каждый callback,
+ * иначе клиент показывает загрузку до таймаута.
+ */
+export async function answerCallback(callbackId, { token, text = '', fetchImpl = fetch } = {}) {
+  const response = await fetchImpl(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ callback_query_id: callbackId, text }),
+  });
+  return response.json();
 }
 
 export async function sendDigest(vacancies, credentials) {
@@ -100,7 +145,7 @@ export async function getUpdates({ token, offset = 0, timeout = 0, signal, fetch
     offset: String(offset),
     // timeout > 0 — длинный опрос: Telegram держит ответ, пока не придёт сообщение.
     timeout: String(timeout),
-    allowed_updates: JSON.stringify(['message']),
+    allowed_updates: JSON.stringify(['message', 'callback_query']),
   });
 
   const response = await fetchImpl(`https://api.telegram.org/bot${token}/getUpdates?${params}`, { signal });
@@ -139,4 +184,27 @@ export function extractCommands(updates, allowedChatId) {
 
 export function lastUpdateId(updates) {
   return updates.reduce((max, update) => Math.max(max, update.update_id ?? 0), 0);
+}
+
+/**
+ * Отбирает нажатия кнопок — тоже только из своего чата.
+ * Нажать кнопку в пересланном сообщении может посторонний.
+ */
+export function extractCallbacks(updates, allowedChatId) {
+  const allowed = String(allowedChatId);
+  const callbacks = [];
+
+  for (const update of updates) {
+    const query = update.callback_query;
+    const chatId = query?.message?.chat?.id;
+    if (!query?.data || String(chatId) !== allowed) continue;
+    callbacks.push({
+      id: query.id,
+      data: query.data,
+      messageId: query.message.message_id,
+      updateId: update.update_id,
+    });
+  }
+
+  return callbacks;
 }
